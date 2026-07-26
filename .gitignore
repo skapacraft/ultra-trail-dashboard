@@ -1,0 +1,17 @@
+# Artefatti generati dal compilatore Monkey C ad ogni build.
+# Vengono ricreati automaticamente: non vanno versionati.
+bin/
+*.prg
+*.prg.debug.xml
+
+# File di sistema macOS
+.DS_Store
+
+# Pacchetto .iq compilato per lo store: rigenerabile da source, non versionato
+# (come bin/*.prg, si ricompila con monkeyc -e -o store/package/UltraTrailDashboard.iq ...)
+store/package/*.iq
+
+# Materiali interni di submission (privacy policy, listing, screenshot, banner):
+# non pubblici, restano solo in locale.
+store/
+tests/

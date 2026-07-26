@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40">
+  <!--
+    Icona allineata al brand LivQ (vedi site-tech/assets/logo-livq.svg e
+    style.css: colori blue #0A58CA e cyan #00B4D8): sfondo blu LivQ,
+    montagna bianca, accento ciano. Niente gradienti: il renderer SVG di
+    Connect IQ supporta in modo affidabile solo forme piene a tinta unita.
+  -->
+  <rect width="40" height="40" rx="7" fill="#0A58CA"/>
+
+  <!-- Montagna sullo sfondo, ciano (colore accento LivQ) -->
+  <polygon points="4,33 17,12 24,22 30,33" fill="#00B4D8"/>
+
+  <!-- Montagna in primo piano, bianca per massimo contrasto -->
+  <polygon points="10,33 21,15 27,25 36,33" fill="#FFFFFF"/>
+</svg>

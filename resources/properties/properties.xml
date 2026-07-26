@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+    PROPERTIES.XML
+    ==============
+    Dichiara le "impostazioni" persistenti dell'app: valori che l'utente
+    può modificare da Garmin Connect Mobile (o dal simulatore) SENZA dover
+    ricompilare l'app. Il sistema li salva sull'orologio e li ripristina
+    automaticamente ad ogni avvio.
+
+    Qui definiamo un solo valore: la durata (in secondi) della finestra di
+    media mobile usata per stabilizzare la pendenza. Di default sono 10
+    secondi (vedi la spiegazione in UltraTrailDashboardView.mc), ma un
+    utente che corre su sentieri molto tecnici potrebbe preferire una
+    finestra più corta (pendenza più reattiva) o più lunga (più stabile).
+-->
+<properties xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://developer.garmin.com/downloads/connect-iq/resources.xsd">
+    <property id="SmoothingWindowSeconds" type="number">10</property>
+</properties>

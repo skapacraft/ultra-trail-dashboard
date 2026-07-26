@@ -1,0 +1,14 @@
+# monkey.jungle
+#
+# Questo è il file di "build" del progetto Connect IQ: dice al compilatore
+# Monkey C dove trovare il manifest e i sorgenti. Nella maggior parte dei
+# progetti creati con l'estensione VS Code viene generato automaticamente
+# e non serve quasi mai modificarlo a mano.
+#
+# project.manifest indica il percorso del manifest.xml (relativo alla
+# cartella del progetto).
+project.manifest = manifest.xml
+
+# Percorso dei sorgenti Monkey C: tutto ciò che sta in source/ viene
+# compilato per tutti i dispositivi target elencati nel manifest.
+base.sourcePath = source

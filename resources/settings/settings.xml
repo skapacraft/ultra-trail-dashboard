@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+    SETTINGS.XML
+    ============
+    Descrive COME viene mostrata all'utente la proprietà definita in
+    properties.xml, dentro il menu impostazioni dell'app dentro Garmin
+    Connect Mobile (Dispositivo -> Campi Dati/App -> Ultra-Trail Dashboard
+    -> Impostazioni) o nel pannello impostazioni del simulatore.
+
+    type="numeric" con min/max mostra un campo numerico con validazione:
+    l'utente non potrà inserire un valore fuori dal range 3-30 secondi.
+-->
+<settings xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://developer.garmin.com/downloads/connect-iq/resources.xsd">
+    <setting propertyKey="@Properties.SmoothingWindowSeconds" title="@Strings.SmoothingWindowTitle">
+        <settingConfig type="numeric" min="3" max="30" required="true"/>
+    </setting>
+</settings>

@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+    STRINGS.XML (lingua di DEFAULT / fallback: inglese)
+    =====================================================
+    Questo file è la base a cui il sistema ricorre quando la lingua del
+    dispositivo non ha una cartella di traduzione dedicata (es. tedesco,
+    francese, ecc. — finché non aggiungiamo anche quelle). Per l'italiano
+    abbiamo invece una cartella separata, resources-ita/strings/strings.xml,
+    che sovrascrive solo le stringhe elencate lì: Connect IQ sceglie
+    automaticamente il set giusto in base alla lingua impostata
+    sull'orologio, senza bisogno di alcuna configurazione nel codice.
+-->
+<resources>
+    <!--
+        AppName: il nome che l'utente vede quando sceglie questo Campo
+        Dati dall'elenco dei campi disponibili sull'orologio.
+        Richiamato nel manifest.xml con @Strings.AppName. Non viene
+        tradotto: è un nome proprio dell'app, uguale in tutte le lingue.
+    -->
+    <string id="AppName">Ultra-Trail Dashboard</string>
+
+    <!--
+        GapFieldLabel: l'etichetta associata al campo FIT che scriviamo
+        nell'attività. È il nome che comparirà nel grafico su Garmin
+        Connect/Strava a fine allenamento.
+    -->
+    <string id="GapFieldLabel">GAP Pace</string>
+
+    <!--
+        SmoothingWindowTitle: etichetta mostrata nel menu impostazioni di
+        Garmin Connect Mobile per il parametro SmoothingWindowSeconds
+        (vedi resources/properties/properties.xml e settings.xml).
+    -->
+    <string id="SmoothingWindowTitle">Grade smoothing window (sec)</string>
+
+    <!--
+        Etichette brevi mostrate sopra ogni valore nei 4 quadranti della UI,
+        per rendere immediatamente chiaro cosa si sta guardando durante la
+        corsa senza dover interpretare i numeri. Tenute volutamente corte
+        per restare leggibili anche sugli schermi più piccoli (FR955).
+    -->
+    <string id="LabelPace">PACE</string>
+    <string id="LabelHeartRate">HR</string>
+    <string id="LabelGrade">GRADE</string>
+    <string id="LabelGap">GAP</string>
+</resources>

@@ -1,0 +1,145 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+    MANIFEST.XML
+    ============
+    Questo file descrive l'applicazione al sistema Connect IQ:
+    - che TIPO di app è (datafield = Campo Dati, quello che si sceglie
+      dentro una pagina dati durante un allenamento)
+    - su QUALI dispositivi può essere installata
+    - quali PERMESSI di sistema richiede (qui: scrivere dati nel file .FIT)
+
+    NOTA SUL GUID:
+    Il valore di iq:application id="..." è il GUID generato in locale con
+    `uuidgen` il 2026-07-16: eb941ffa-e0e1-4d10-83d4-6f34a684afc6. Questo
+    è l'"Application ID" REGISTRATO per l'app sul Developer Portal (assegnato
+    al primo caricamento) e NON va confuso con l'ID che compare nell'URL
+    della scheda pubblica dello store (76cbcc4a-623e-40da-87c7-762187c3247c),
+    che è solo l'identificativo della scheda/listing, un namespace diverso.
+    Il portale stesso rifiuta l'upload con un errore esplicito
+    ("L'ID dell'app nel file manifest è diverso da quello registrato per
+    questa app") se questo valore non combacia con eb941ffa... — quindi
+    NON cambiare mai questo id dopo la prima pubblicazione, se non
+    indicato diversamente da un errore analogo del portale.
+-->
+<iq:manifest xmlns:iq="http://www.garmin.com/xml/connectiq" version="3">
+
+    <!--
+        type="datafield"  -> dice al sistema che questa non è un'app
+        autonoma ma un Campo Dati da agganciare a un'attività (es. Trail Run).
+
+        entry="UltraTrailDashboardApp" -> nome della classe Application
+        principale, quella definita in source/UltraTrailDashboardApp.mc
+
+        minSdkVersion -> versione minima dell'SDK Connect IQ richiesta.
+        3.1.0 (invece di 3.2.0) serve per includere il Forerunner 935,
+        che supporta al massimo l'API level 3.1 ma è comunque un
+        dispositivo molto diffuso tra i trail/ultra runner.
+    -->
+    <iq:application
+        id="eb941ffa-e0e1-4d10-83d4-6f34a684afc6"
+        type="datafield"
+        name="@Strings.AppName"
+        entry="UltraTrailDashboardApp"
+        launcherIcon="@Drawables.LauncherIcon"
+        minSdkVersion="3.1.0">
+
+        <!--
+            Elenco dei dispositivi supportati: tutta la gamma di orologi
+            Garmin con altimetro barometrico e memoria sufficiente per un
+            Campo Dati "Complex" con scrittura FIT, rilevanti per trail
+            running/ultra. Se in futuro esce un nuovo modello, basta
+            aggiungere una riga <iq:product id="..."/> con l'id giusto:
+            l'elenco completo si trova nel Connect IQ SDK Manager (sezione
+            "Devices") o con "Monkey C: Edit Products" da VS Code.
+        -->
+        <iq:products>
+            <!-- Fenix 6 (ancora molto diffusi; le varianti base hanno solo
+                 32KB di memoria per i Data Field contro i 128KB delle Pro,
+                 ma l'app ci sta comunque: verificato con build di prova) -->
+            <iq:product id="fenix6"/>
+            <iq:product id="fenix6s"/>
+            <iq:product id="fenix6pro"/>
+            <iq:product id="fenix6spro"/>
+            <iq:product id="fenix6xpro"/>
+
+            <!-- Fenix 7 -->
+            <iq:product id="fenix7"/>
+            <iq:product id="fenix7s"/>
+            <iq:product id="fenix7x"/>
+            <iq:product id="fenix7pro"/>
+            <iq:product id="fenix7spro"/>
+            <iq:product id="fenix7xpro"/>
+            <iq:product id="fenix7pronowifi"/>
+            <iq:product id="fenix7xpronowifi"/>
+
+            <!-- Fenix 8 (ultima generazione) -->
+            <iq:product id="fenix843mm"/>
+            <iq:product id="fenix847mm"/>
+            <iq:product id="fenix8pro47mm"/>
+            <iq:product id="fenix8solar47mm"/>
+            <iq:product id="fenix8solar51mm"/>
+
+            <!-- Epix 2 (stesso hardware del Fenix 7, schermo AMOLED) -->
+            <iq:product id="epix2"/>
+            <iq:product id="epix2pro42mm"/>
+            <iq:product id="epix2pro47mm"/>
+            <iq:product id="epix2pro51mm"/>
+
+            <!-- Enduro (autonomia estesa, pensati per ultra-endurance:
+                 il pubblico più naturale per quest'app) -->
+            <iq:product id="enduro"/>
+            <iq:product id="enduro3"/>
+
+            <!-- MARQ Adventurer/Expedition/Athlete (linee outdoor e sport) -->
+            <iq:product id="marqadventurer"/>
+            <iq:product id="marqexpedition"/>
+            <iq:product id="marqathlete"/>
+
+            <!-- Forerunner multisport/trail-oriented (altimetro barometrico,
+                 è la fascia che Garmin posiziona per triathlon e ultra-trail).
+                 Esclusa deliberatamente la fascia 255/265, più orientata
+                 alla corsa su strada/pista: hanno comunque il barometro,
+                 ma il pubblico trail è una fetta minore, quindi si punta
+                 alla categoria principale. FR935 incluso perché storicamente
+                 molto diffuso tra i trail/ultra runner nonostante l'età
+                 (per lui serviva minSdkVersion 3.1.0). -->
+            <iq:product id="fr935"/>
+            <iq:product id="fr945"/>
+            <iq:product id="fr945lte"/>
+            <iq:product id="fr955"/>
+            <iq:product id="fr965"/>
+            <iq:product id="fr970"/>
+
+            <!--
+                Forerunner 170: NON ha altimetro barometrico (solo quota
+                da GPS), quindi la pendenza sarà meno precisa/stabile che
+                sugli altri modelli. Incluso comunque su richiesta esplicita
+                dell'utente, che possiede questo modello: l'app resta
+                utilizzabile, il codice gestisce già in modo sicuro
+                un'altitudine meno affidabile (nessun crash, solo minore
+                precisione).
+            -->
+            <iq:product id="fr170"/>
+            <iq:product id="fr170m"/>
+        </iq:products>
+
+        <!--
+            PERMESSO FONDAMENTALE:
+            "FitContributor" è ciò che ci autorizza a scrivere il nostro
+            campo GAP calcolato dentro al file .FIT dell'attività, così
+            da poterlo poi vedere/graficare su Garmin Connect e Strava.
+            Senza questo permesso, la chiamata a createField() nel codice
+            fallirebbe.
+        -->
+        <iq:permissions>
+            <iq:uses-permission id="FitContributor"/>
+        </iq:permissions>
+
+        <iq:languages>
+            <iq:language>ita</iq:language>
+            <iq:language>eng</iq:language>
+        </iq:languages>
+
+    </iq:application>
+
+</iq:manifest>

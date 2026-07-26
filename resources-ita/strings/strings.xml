@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+    STRINGS.XML (traduzione ITALIANA)
+    ==================================
+    Sovrascrive SOLO le stringhe elencate qui sotto quando l'orologio è
+    impostato in lingua italiana. Le stringhe non presenti in questo file
+    (es. AppName, GapFieldLabel) restano quelle definite nel file di
+    default in resources/strings/strings.xml (inglese) — non serve
+    duplicarle qui se non vanno tradotte.
+-->
+<resources>
+    <string id="SmoothingWindowTitle">Finestra smoothing pendenza (sec)</string>
+
+    <string id="LabelPace">PASSO</string>
+    <string id="LabelHeartRate">HR</string>
+    <string id="LabelGrade">PEND</string>
+    <string id="LabelGap">GAP</string>
+</resources>
