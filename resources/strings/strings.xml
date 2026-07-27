@@ -36,8 +36,16 @@
     <!--
         Etichette brevi mostrate sopra ogni valore nei 4 quadranti della UI,
         per rendere immediatamente chiaro cosa si sta guardando durante la
-        corsa senza dover interpretare i numeri. Tenute volutamente corte
-        per restare leggibili anche sugli schermi più piccoli (FR955).
+        corsa senza dover interpretare i numeri.
+
+        VINCOLO PER LE TRADUZIONI - MASSIMO 6 CARATTERI.
+        Le etichette sono disegnate con FONT_XTINY, che è il font di sistema
+        più piccolo disponibile: a differenza dei valori (per i quali il
+        codice sceglie a runtime il font più grande che ci sta nello spazio),
+        qui non esiste alcun ripiego più piccolo. Un'etichetta più lunga
+        sconfinerebbe oltre la linea divisoria nel quadrante accanto,
+        soprattutto sugli schermi più piccoli (240x240 di FR955/Fenix 6S).
+        Preferire un'abbreviazione comprensibile alla parola per esteso.
     -->
     <string id="LabelPace">PACE</string>
     <string id="LabelHeartRate">HR</string>

@@ -84,7 +84,11 @@ class UltraTrailDashboardView extends WatchUi.DataField {
     // ------------------------------------------------------------------
 
     // Riferimento al campo personalizzato che scriviamo nel file .FIT.
-    private var mGapField as FitContributor.Field;
+    // Nullable per scelta: se createField() dovesse fallire su un
+    // dispositivo/firmware particolare, l'app continua a funzionare come
+    // display (i 4 quadranti restano corretti) invece di andare in crash
+    // alla prima scrittura. Si perde solo la registrazione del GAP nel FIT.
+    private var mGapField as FitContributor.Field?;
 
     // Array circolari a dimensione FISSA per lo storico di quota e
     // distanza, usati per calcolare la pendenza stabilizzata.
@@ -111,6 +115,13 @@ class UltraTrailDashboardView extends WatchUi.DataField {
     // lavora su un RAPPORTO tra costi energetici, non su un'unità fissa.
     private var mSmoothedGradePercent as Float;
     private var mGapPaceSecPerUnit as Float;
+
+    // Diventa true solo dopo il PRIMO GAP calcolato su un passo valido.
+    // Finché resta false non scriviamo nulla nel file FIT: scrivere 0.0
+    // mentre si è fermi in partenza registrerebbe uno zero come se fosse
+    // un dato reale, creando un picco nel grafico di Garmin Connect e
+    // falsando le medie dell'attività.
+    private var mHasValidGap as Boolean;
 
     // Distanza di riferimento (in metri) per convertire la velocità in
     // passo: 1000 m per il sistema metrico, 1609.344 m (1 miglio) per
@@ -147,7 +158,7 @@ class UltraTrailDashboardView extends WatchUi.DataField {
     // nello spazio disponibile: così i numeri sono sempre il più leggibili
     // possibile SENZA mai sovrapporsi tra un quadrante e l'altro, su
     // qualunque dispositivo. L'array è allocato una sola volta qui.
-    private var mValueFontCandidates as Array;
+    private var mValueFontCandidates as Array<Graphics.FontType>;
 
     // Valori di disegno condivisi tra i 4 quadranti, ricalcolati una volta
     // all'inizio di ogni onUpdate() e poi letti da drawQuadrant() come
@@ -158,13 +169,27 @@ class UltraTrailDashboardView extends WatchUi.DataField {
     // drawQuadrant() ad ogni chiamata (come si farebbe su un linguaggio
     // moderno senza questo vincolo) superava il limite e impediva la
     // compilazione su quei device.
-    private var mDrawLabelFont;
-    private var mDrawValueFont;
+    private var mDrawLabelFont as Graphics.FontType;
+    private var mDrawValueFont as Graphics.FontType;
     private var mDrawLabelHeight as Number;
     private var mDrawValueHeight as Number;
     private var mDrawGap as Number;
     private var mDrawLabelColor as Graphics.ColorType;
     private var mDrawBackgroundColor as Graphics.ColorType;
+
+    // --- Cache della scelta del font ---------------------------------
+    // Misurare la larghezza di 4 stringhe su 3 font candidati costa fino a
+    // 12 chiamate a getTextWidthInPixels() per ogni ridisegno. Le stringhe
+    // però cambiano al massimo 1 volta al secondo (in compute()), mentre
+    // onUpdate() può essere invocato molto più spesso: rifare la misura ad
+    // ogni frame è lavoro sprecato, pesante soprattutto sui dispositivi con
+    // solo 32KB per i Data Field (Fenix 6 base, FR935, Enduro 1ª gen).
+    // Ricalcoliamo quindi solo quando cambia qualcosa che influisce davvero
+    // sul risultato: le stringhe da disegnare o le dimensioni dello schermo.
+    private var mLayoutDirty as Boolean;
+    private var mCachedValueFont as Graphics.FontType;
+    private var mCachedLayoutWidth as Number;
+    private var mCachedLayoutHeight as Number;
 
     // ------------------------------------------------------------------
     // COSTRUTTORE
@@ -201,12 +226,18 @@ class UltraTrailDashboardView extends WatchUi.DataField {
         var paceUnitLabel = (mUnitDistanceMeters == METERS_PER_MILE) ? "min/mi" : "min/km";
 
         var gapFieldLabel = WatchUi.loadResource(Rez.Strings.GapFieldLabel) as String;
-        mGapField = createField(
-            gapFieldLabel,
-            0,
-            FitContributor.DATA_TYPE_FLOAT,
-            { :mesgType => FitContributor.MESG_TYPE_RECORD, :units => paceUnitLabel }
-        ) as FitContributor.Field;
+        try {
+            mGapField = createField(
+                gapFieldLabel,
+                0,
+                FitContributor.DATA_TYPE_FLOAT,
+                { :mesgType => FitContributor.MESG_TYPE_RECORD, :units => paceUnitLabel }
+            ) as FitContributor.Field;
+        } catch (ex) {
+            // Nessuna registrazione FIT disponibile: l'app resta comunque
+            // pienamente utilizzabile come display a schermo.
+            mGapField = null;
+        }
 
         // --- Allocazione array a dimensione fissa per lo smoothing -----
         // Allochiamo sempre alla dimensione MASSIMA possibile: la finestra
@@ -228,6 +259,7 @@ class UltraTrailDashboardView extends WatchUi.DataField {
 
         mSmoothedGradePercent = 0.0;
         mGapPaceSecPerUnit = 0.0;
+        mHasValidGap = false;
 
         // Valori "placeholder" mostrati finché non arriva il primo dato
         // valido (es. subito dopo l'avvio dell'attività).
@@ -251,15 +283,22 @@ class UltraTrailDashboardView extends WatchUi.DataField {
             || (screenShape == System.SCREEN_SHAPE_SEMI_ROUND);
 
         // Font candidati per i valori, dal più grande al più piccolo.
-        // Nota: non includiamo FONT_NUMBER_HOT (il più grande disponibile):
-        // anche quando c'era spazio a sufficienza, risultava visivamente
-        // troppo ingombrante rispetto alle etichette. FONT_NUMBER_MEDIUM
-        // come tetto massimo dà un aspetto più equilibrato.
+        //
+        // ATTENZIONE se si modifica questa lista: i font numerici
+        // (FONT_NUMBER_*) contengono un set ridotto di glifi, storicamente
+        // limitato a cifre, ':', '.' e '-'. La stringa della pendenza usa
+        // anche '%' e '+', che su alcuni firmware potrebbero non essere
+        // presenti nel font numerico. FONT_NUMBER_MILD è stato verificato
+        // visivamente su Fenix 7, Forerunner 170 ed Enduro 3 (MIP e AMOLED)
+        // e rende correttamente entrambi i caratteri; i font successivi
+        // della lista sono font di testo, che hanno comunque il set completo.
+        // Prima di introdurre un font numerico più grande (es. FONT_NUMBER_
+        // MEDIUM/HOT) va rifatta la stessa verifica visiva.
         mValueFontCandidates = [
             Graphics.FONT_NUMBER_MILD,
             Graphics.FONT_LARGE,
             Graphics.FONT_MEDIUM
-        ] as Array;
+        ] as Array<Graphics.FontType>;
 
         // Valori di default per i campi di disegno condivisi: verranno
         // sovrascritti ad ogni onUpdate() prima di essere usati, ma vanno
@@ -271,6 +310,13 @@ class UltraTrailDashboardView extends WatchUi.DataField {
         mDrawGap = 0;
         mDrawLabelColor = Graphics.COLOR_LT_GRAY;
         mDrawBackgroundColor = Graphics.COLOR_BLACK;
+
+        // Cache della scelta del font: parte "sporca" così il primo
+        // onUpdate() calcola il layout reale invece di usare i default.
+        mLayoutDirty = true;
+        mCachedValueFont = Graphics.FONT_NUMBER_MILD;
+        mCachedLayoutWidth = 0;
+        mCachedLayoutHeight = 0;
     }
 
     // ------------------------------------------------------------------
@@ -281,7 +327,15 @@ class UltraTrailDashboardView extends WatchUi.DataField {
     // usiamo il default sicuro invece di far fallire l'app.
     // ------------------------------------------------------------------
     private function loadSmoothingWindowSetting() as Number {
-        var rawValue = Properties.getValue("SmoothingWindowSeconds");
+        // getValue() solleva un'eccezione se la chiave non esiste (es. se
+        // in futuro venisse rinominata in properties.xml senza aggiornare
+        // qui): la intercettiamo per non far crashare l'app all'avvio.
+        var rawValue = null;
+        try {
+            rawValue = Properties.getValue("SmoothingWindowSeconds");
+        } catch (ex) {
+            return DEFAULT_HISTORY_SIZE;
+        }
 
         if (rawValue == null || !(rawValue instanceof Number)) {
             return DEFAULT_HISTORY_SIZE;
@@ -298,15 +352,53 @@ class UltraTrailDashboardView extends WatchUi.DataField {
     }
 
     // ------------------------------------------------------------------
-    // onSettingsChanged(): il sistema la richiama automaticamente quando
-    // l'utente modifica le impostazioni da Garmin Connect Mobile mentre
-    // l'app è installata. Ricarichiamo la finestra di smoothing e
-    // azzeriamo lo storico: mischiare campioni raccolti con una finestra
-    // diversa da quella nuova darebbe una pendenza calcolata in modo
-    // incoerente per i primi secondi.
+    // applySettings(): ricarica la finestra di smoothing dalle impostazioni
+    // utente e azzera lo storico (mischiare campioni raccolti con una
+    // finestra diversa da quella nuova darebbe una pendenza incoerente per
+    // i primi secondi).
+    //
+    // ATTENZIONE: questo metodo NON è un callback di sistema. Il callback
+    // onSettingsChanged() appartiene a Application.AppBase, non a
+    // WatchUi.DataField: definirlo qui non avrebbe alcun effetto perché il
+    // sistema non lo chiamerebbe mai. È quindi UltraTrailDashboardApp a
+    // ricevere l'evento e a invocare questo metodo sulla View.
     // ------------------------------------------------------------------
-    function onSettingsChanged() as Void {
+    function applySettings() as Void {
         mHistorySize = loadSmoothingWindowSetting();
+        resetGradeHistory();
+    }
+
+    // ------------------------------------------------------------------
+    // onTimerReset(): callback di DataField, invocato quando l'utente
+    // resetta l'attività per iniziarne una nuova.
+    //
+    // È indispensabile azzerare qui lo storico: info.elapsedDistance
+    // riparte da zero, mentre il buffer conterrebbe ancora le distanze
+    // cumulate dell'attività precedente (es. 3000 m). Il delta risulterebbe
+    // NEGATIVO e non supererebbe mai MIN_DISTANCE_FOR_GRADE, lasciando la
+    // pendenza congelata sull'ultimo valore della corsa precedente fino al
+    // completo riempimento del buffer (fino a 30 secondi).
+    // ------------------------------------------------------------------
+    function onTimerReset() as Void {
+        resetGradeHistory();
+
+        mSmoothedGradePercent = 0.0;
+        mGapPaceSecPerUnit = 0.0;
+        mHasValidGap = false;
+
+        mPaceStr = "--:--";
+        mHrStr = "---";
+        mGradeStr = "0.0%";
+        mGapStr = "--:--";
+        mLayoutDirty = true;
+    }
+
+    // ------------------------------------------------------------------
+    // Svuota il buffer circolare di quota/distanza. Non riallochiamo gli
+    // array (restano quelli fissi creati in initialize()): azzerare indice
+    // e contatore basta a far ripartire la finestra da zero.
+    // ------------------------------------------------------------------
+    private function resetGradeHistory() as Void {
         mHistIndex = 0;
         mHistCount = 0;
     }
@@ -321,9 +413,17 @@ class UltraTrailDashboardView extends WatchUi.DataField {
         // --- 1) Aggiornamento storico quota/distanza -------------------
         // Aggiorniamo l'array circolare solo se il dispositivo fornisce
         // sia la quota (altimetro barometrico) sia la distanza percorsa.
-        if (info.altitude != null && info.elapsedDistance != null) {
-            mAltHistory[mHistIndex] = info.altitude as Float;
-            mDistHistory[mHistIndex] = info.elapsedDistance as Float;
+        //
+        // Copiamo i campi di Activity.Info in variabili locali PRIMA di
+        // usarli: il controllo "!= null" su una proprietà non garantisce
+        // che la lettura successiva restituisca lo stesso valore, quindi
+        // leggere due volte è un rischio di dereferenziazione nulla. Con
+        // una copia locale il valore verificato è esattamente quello usato.
+        var altitude = info.altitude;
+        var elapsedDistance = info.elapsedDistance;
+        if (altitude != null && elapsedDistance != null) {
+            mAltHistory[mHistIndex] = altitude;
+            mDistHistory[mHistIndex] = elapsedDistance;
 
             // Avanziamo l'indice circolare (torna a 0 dopo l'ultima cella
             // della finestra CONFIGURATA, non dell'array intero: usiamo
@@ -365,10 +465,14 @@ class UltraTrailDashboardView extends WatchUi.DataField {
         // delle unità di misura scelte dall'utente sul dispositivo: il
         // resto del calcolo (GAP, formattazione) non deve sapere quale
         // unità sia in uso, lavora sempre su "secondi per unità".
+        // Anche qui la velocità viene copiata in una locale prima del
+        // controllo di nullità: senza la copia, la divisione userebbe una
+        // seconda lettura della proprietà, non coperta dal controllo.
         var currentPaceSecPerUnit = 0.0;
         var hasValidPace = false;
-        if (info.currentSpeed != null && info.currentSpeed > 0.1) {
-            currentPaceSecPerUnit = mUnitDistanceMeters / info.currentSpeed;
+        var currentSpeed = info.currentSpeed;
+        if (currentSpeed != null && currentSpeed > 0.1) {
+            currentPaceSecPerUnit = mUnitDistanceMeters / currentSpeed;
             hasValidPace = true;
         }
 
@@ -378,6 +482,7 @@ class UltraTrailDashboardView extends WatchUi.DataField {
         // usata per il passo in ingresso (km o miglio).
         if (hasValidPace) {
             mGapPaceSecPerUnit = calculateGap(currentPaceSecPerUnit, mSmoothedGradePercent);
+            mHasValidGap = true;
         }
 
         // --- 5) Scrittura del valore nel file FIT -----------------------
@@ -385,22 +490,76 @@ class UltraTrailDashboardView extends WatchUi.DataField {
         // dichiarata in createField() (min/km o min/mi) riflette la stessa
         // unità usata qui, così i grafici su Garmin Connect/Strava restano
         // coerenti con le impostazioni dell'utente.
-        mGapField.setData(mGapPaceSecPerUnit / 60.0);
+        //
+        // Scriviamo SOLO dopo aver calcolato almeno un GAP valido: prima di
+        // allora il valore sarebbe 0.0, che verrebbe registrato come un dato
+        // reale (picco a zero nel grafico e medie falsate) invece che come
+        // "dato non disponibile". Da fermi con il timer avviato il campo
+        // conserva l'ultimo GAP valido: non esiste un modo di scrivere un
+        // valore "invalido" via setData(), che accetta solo il tipo
+        // dichiarato in createField() e altrimenti solleva un'eccezione.
+        var gapField = mGapField;
+        if (gapField != null && mHasValidGap) {
+            gapField.setData(mGapPaceSecPerUnit / 60.0);
+        }
 
         // --- 6) Pre-formattazione delle stringhe per il disegno --------
         // Facciamo qui il lavoro "costoso" di formattazione, così
         // onUpdate() dovrà solo disegnare stringhe già pronte.
-        mPaceStr = hasValidPace ? formatPace(currentPaceSecPerUnit) : "--:--";
-        mHrStr = (info.currentHeartRate != null) ? (info.currentHeartRate as Number).toString() : "---";
-        mGradeStr = formatGrade(mSmoothedGradePercent);
-        mGapStr = hasValidPace ? formatPace(mGapPaceSecPerUnit) : "--:--";
+        //
+        // Segnaliamo con mLayoutDirty se una stringa è cambiata davvero:
+        // solo in quel caso onUpdate() dovrà rimisurare i font (vedi la
+        // cache del layout più avanti).
+        var currentHeartRate = info.currentHeartRate;
+        setPaceStr(hasValidPace ? formatPace(currentPaceSecPerUnit) : "--:--");
+        setHrStr((currentHeartRate != null) ? currentHeartRate.toString() : "---");
+        setGradeStr(formatGrade(mSmoothedGradePercent));
+        setGapStr(hasValidPace ? formatPace(mGapPaceSecPerUnit) : "--:--");
 
         // Il valore restituito viene usato solo come fallback se il
         // sistema dovesse mostrare questo campo in un layout semplice
         // (es. nella schermata di riepilogo); il nostro disegno custom
         // in onUpdate() ha comunque sempre la precedenza sullo schermo
-        // di allenamento.
+        // di allenamento. Restituiamo null finché non c'è un GAP valido,
+        // così il sistema mostra "--" invece di uno zero fuorviante.
+        if (!mHasValidGap) {
+            return null;
+        }
         return mGapPaceSecPerUnit / 60.0;
+    }
+
+    // ------------------------------------------------------------------
+    // Setter delle 4 stringhe visualizzate. Aggiornano il valore solo se è
+    // effettivamente cambiato e, in quel caso, marcano il layout come da
+    // ricalcolare: è ciò che permette a onUpdate() di saltare le misure dei
+    // font quando non serve rifarle.
+    // ------------------------------------------------------------------
+    private function setPaceStr(value as String) as Void {
+        if (!value.equals(mPaceStr)) {
+            mPaceStr = value;
+            mLayoutDirty = true;
+        }
+    }
+
+    private function setHrStr(value as String) as Void {
+        if (!value.equals(mHrStr)) {
+            mHrStr = value;
+            mLayoutDirty = true;
+        }
+    }
+
+    private function setGradeStr(value as String) as Void {
+        if (!value.equals(mGradeStr)) {
+            mGradeStr = value;
+            mLayoutDirty = true;
+        }
+    }
+
+    private function setGapStr(value as String) as Void {
+        if (!value.equals(mGapStr)) {
+            mGapStr = value;
+            mLayoutDirty = true;
+        }
     }
 
     // ------------------------------------------------------------------
@@ -505,15 +664,25 @@ class UltraTrailDashboardView extends WatchUi.DataField {
         // schermo MIP o AMOLED). Scegliamo il colore del testo che
         // garantisce sempre il massimo contrasto leggibile.
         var backgroundColor = getBackgroundColor();
-        var valueColor = (backgroundColor == Graphics.COLOR_BLACK)
+        var isDarkBackground = (backgroundColor == Graphics.COLOR_BLACK);
+        var valueColor = isDarkBackground
             ? Graphics.COLOR_WHITE
             : Graphics.COLOR_BLACK;
-        // Le etichette usano un grigio intermedio, sempre ben visibile ma
-        // volutamente meno "urlato" del valore, per creare gerarchia.
-        var labelColor = Graphics.COLOR_LT_GRAY;
-        // Le linee divisorie usano un grigio ancora più tenue: dividono i
-        // quadranti senza attirare l'occhio più dei dati stessi.
-        var dividerColor = Graphics.COLOR_DK_GRAY;
+
+        // Etichette e linee divisorie devono essere attenuate rispetto al
+        // valore, ma il grigio giusto DIPENDE dallo sfondo: su fondo scuro
+        // serve un grigio chiaro, su fondo chiaro (tema MIP chiaro) serve un
+        // grigio scuro. Usare LT_GRAY fisso rendeva le etichette quasi
+        // invisibili su sfondo bianco.
+        var labelColor;
+        var dividerColor;
+        if (isDarkBackground) {
+            labelColor = Graphics.COLOR_LT_GRAY;
+            dividerColor = Graphics.COLOR_DK_GRAY;
+        } else {
+            labelColor = Graphics.COLOR_DK_GRAY;
+            dividerColor = Graphics.COLOR_LT_GRAY;
+        }
 
         // Puliamo lo sfondo con il colore corretto.
         dc.setColor(valueColor, backgroundColor);
@@ -571,22 +740,36 @@ class UltraTrailDashboardView extends WatchUi.DataField {
             maxValueWidth = 20; // pavimento di sicurezza, non dovrebbe mai servire
         }
 
-        var valueFont = mValueFontCandidates[mValueFontCandidates.size() - 1];
-        for (var f = 0; f < mValueFontCandidates.size(); f++) {
-            var candidateFont = mValueFontCandidates[f];
-            var widestTextPx = dc.getTextWidthInPixels(mPaceStr, candidateFont);
-            var hrWidthPx = dc.getTextWidthInPixels(mHrStr, candidateFont);
-            if (hrWidthPx > widestTextPx) { widestTextPx = hrWidthPx; }
-            var gradeWidthPx = dc.getTextWidthInPixels(mGradeStr, candidateFont);
-            if (gradeWidthPx > widestTextPx) { widestTextPx = gradeWidthPx; }
-            var gapWidthPx = dc.getTextWidthInPixels(mGapStr, candidateFont);
-            if (gapWidthPx > widestTextPx) { widestTextPx = gapWidthPx; }
+        // La misura vera e propria si fa solo se qualcosa è cambiato: una
+        // delle 4 stringhe (mLayoutDirty, impostato dai setter in compute())
+        // oppure le dimensioni del contesto grafico. Altrimenti riusiamo il
+        // font già calcolato, risparmiando fino a 12 getTextWidthInPixels()
+        // per ogni ridisegno.
+        if (mLayoutDirty || width != mCachedLayoutWidth || height != mCachedLayoutHeight) {
+            var chosenFont = mValueFontCandidates[mValueFontCandidates.size() - 1];
+            for (var f = 0; f < mValueFontCandidates.size(); f++) {
+                var candidateFont = mValueFontCandidates[f];
+                var widestTextPx = dc.getTextWidthInPixels(mPaceStr, candidateFont);
+                var hrWidthPx = dc.getTextWidthInPixels(mHrStr, candidateFont);
+                if (hrWidthPx > widestTextPx) { widestTextPx = hrWidthPx; }
+                var gradeWidthPx = dc.getTextWidthInPixels(mGradeStr, candidateFont);
+                if (gradeWidthPx > widestTextPx) { widestTextPx = gradeWidthPx; }
+                var gapWidthPx = dc.getTextWidthInPixels(mGapStr, candidateFont);
+                if (gapWidthPx > widestTextPx) { widestTextPx = gapWidthPx; }
 
-            if (widestTextPx <= maxValueWidth) {
-                valueFont = candidateFont;
-                break;
+                if (widestTextPx <= maxValueWidth) {
+                    chosenFont = candidateFont;
+                    break;
+                }
             }
+
+            mCachedValueFont = chosenFont;
+            mCachedLayoutWidth = width;
+            mCachedLayoutHeight = height;
+            mLayoutDirty = false;
         }
+
+        var valueFont = mCachedValueFont;
 
         // Font dell'ETICHETTA: sempre piccolo e fisso, leggibile ma
         // chiaramente secondario rispetto al valore.

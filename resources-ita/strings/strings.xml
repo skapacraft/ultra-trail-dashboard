@@ -11,6 +11,13 @@
 <resources>
     <string id="SmoothingWindowTitle">Finestra smoothing pendenza (sec)</string>
 
+    <!--
+        VINCOLO - MASSIMO 6 CARATTERI per le 4 etichette dei quadranti.
+        Sono disegnate con FONT_XTINY (il font di sistema più piccolo, senza
+        alcun ripiego più piccolo disponibile): oltre i 6 caratteri
+        sconfinano nel quadrante accanto sugli schermi 240x240.
+        Vedi il commento esteso in resources/strings/strings.xml.
+    -->
     <string id="LabelPace">PASSO</string>
     <string id="LabelHeartRate">HR</string>
     <string id="LabelGrade">PEND</string>
