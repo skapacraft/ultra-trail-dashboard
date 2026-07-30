@@ -33,9 +33,16 @@ class UltraTrailDashboardApp extends Application.AppBase {
     }
 
     // onStop(): chiamato quando l'app viene chiusa (es. fine allenamento).
-    // Anche qui non serve nulla di speciale: il sistema salva già il file
-    // FIT autonomamente.
+    // Il file FIT lo salva già il sistema per conto suo, ma i record
+    // personali usati dall'autocalibrazione vivono nello Storage dell'app
+    // e li dobbiamo scrivere noi. La View lo fa già allo stop del timer:
+    // questa è la rete di sicurezza per i casi in cui quel callback non
+    // arriva (attività chiusa da menu, app terminata dal sistema).
     function onStop(state as Dictionary?) as Void {
+        var view = mView;
+        if (view != null) {
+            view.persistCalibration();
+        }
     }
 
     // getInitialView(): il sistema chiama questa funzione per sapere quale

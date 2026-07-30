@@ -1,0 +1,14 @@
+# test.jungle
+#
+# File di build AGGIUNTIVO, usato solo per compilare i test unitari.
+# Va passato al compilatore INSIEME a monkey.jungle:
+#
+#   monkeyc -f monkey.jungle -f test.jungle -o bin/test.prg \
+#           -y developer_key -d fenix7 --unit-test
+#   monkeydo bin/test.prg fenix7 -t
+#
+# Tenere i test in una cartella separata, inclusa solo da qui, garantisce
+# che la build di rilascio (che usa il solo monkey.jungle) non li veda
+# nemmeno: sull'orologio non finisce un byte di codice di test. Su un Data
+# Field che deve stare in 32KB non è un dettaglio.
+base.sourcePath = $(base.sourcePath);source-test

@@ -7,8 +7,9 @@
 //
 //   - compute(info)  -> chiamato 1 volta al secondo, riceve i dati grezzi
 //                        dell'attività (passo, quota, distanza, HR, ...).
-//                        Qui facciamo TUTTI i calcoli (pendenza, GAP) e
-//                        scriviamo il valore nel file FIT.
+//                        Qui facciamo TUTTI i calcoli (pendenza, GAP,
+//                        aggiornamento del motore fisiologico) e scriviamo
+//                        i valori nel file FIT.
 //
 //   - onUpdate(dc)    -> chiamato ogni volta che lo schermo deve essere
 //                        ridisegnato. Qui NON facciamo calcoli: disegniamo
@@ -22,6 +23,13 @@
 // Tutto ciò che serve (array a dimensione fissa, stringhe formattate) è
 // allocato una sola volta in initialize() oppure ricalcolato in compute()
 // (che gira comunque solo 1 volta al secondo, non ad ogni frame).
+//
+// ARCHITETTURA A LIVELLI:
+// questa View è il livello 0 (sensori) e il livello 4 (decisione). In mezzo
+// stanno tre componenti separati, uno per file:
+//   MinettiCost        livello 1, il costo energetico della pendenza
+//   EnduranceEngine    livello 2 e 3, lo stato fisiologico e la previsione
+//   SpeedCalibration   stima automatica dei parametri dell'atleta
 
 import Toybox.WatchUi;
 import Toybox.Graphics;
@@ -33,6 +41,50 @@ import Toybox.Math;
 import Toybox.Application.Properties;
 
 class UltraTrailDashboardView extends WatchUi.DataField {
+
+    // ------------------------------------------------------------------
+    // SORGENTI DISPONIBILI PER I QUADRANTI
+    // ------------------------------------------------------------------
+    // L'utente sceglie da Garmin Connect Mobile quale grandezza mostrare in
+    // ognuno dei 4 quadranti. Questi numeri sono il contratto con
+    // resources/settings/settings.xml: i <listEntry value="..."> devono
+    // combaciare, e i valori NON vanno mai riordinati dopo una
+    // pubblicazione, altrimenti la configurazione già salvata sugli
+    // orologi degli utenti si ritroverebbe a puntare al campo sbagliato.
+    private const SRC_PACE as Number = 0;
+    private const SRC_HR as Number = 1;
+    private const SRC_GRADE as Number = 2;
+    private const SRC_GAP as Number = 3;
+    private const SRC_RESERVE as Number = 4;
+    private const SRC_TTF as Number = 5;
+    private const SRC_SUSTAIN as Number = 6;
+    private const SRC_CARB as Number = 7;
+    private const SRC_QUADS as Number = 8;
+    private const SRC_COUNT as Number = 9;
+
+    // Quale sistema fisiologico sta limitando l'atleta in questo momento.
+    //
+    // È il cuore del campo LIMITE: invece di sommare grandezze diverse in
+    // un indice inventato, ogni sottosistema dichiara quanto manca al
+    // proprio cedimento, e mostriamo il minimo insieme al nome di chi lo
+    // impone. Il limite non è un punteggio, è il primo sistema che cede, e
+    // sapere QUALE è ciò che dice all'atleta cosa fare: rallentare, mangiare,
+    // o frenare meno in discesa. Sono tre azioni diverse, e un indice unico
+    // non saprebbe distinguerle.
+    private const BIND_NONE as Number = 0;
+    private const BIND_ANAEROBIC as Number = 1;
+    private const BIND_CARB as Number = 2;
+    private const BIND_QUADS as Number = 3;
+
+    // Numero di quadranti sullo schermo. Non è configurabile: la griglia
+    // 2x2 è ciò che rende il campo leggibile a colpo d'occhio in corsa.
+    private const QUADRANT_COUNT as Number = 4;
+
+    // Livelli di allerta usati per colorare un valore. Sono il "livello 4"
+    // dell'architettura: la traduzione da numero a giudizio.
+    private const LEVEL_NORMAL as Number = 0;
+    private const LEVEL_WARNING as Number = 1;
+    private const LEVEL_DANGER as Number = 2;
 
     // ------------------------------------------------------------------
     // COSTANTI DI CONFIGURAZIONE
@@ -58,19 +110,56 @@ class UltraTrailDashboardView extends WatchUi.DataField {
     // semplicemente l'ultimo valore di pendenza valido calcolato.
     private const MIN_DISTANCE_FOR_GRADE as Float = 3.0;
 
-    // Limite di pendenza (in valore assoluto, frazione non percentuale)
-    // oltre il quale "blocchiamo" la formula del GAP: sopra il 45% di
-    // pendenza il modello di Minetti non è più stato validato e darebbe
-    // risultati assurdi (o addirittura negativi).
-    private const MAX_GRADE_FRACTION as Float = 0.45;
-
     // Soglie di pendenza (valore assoluto, in percentuale) oltre le quali
     // coloriamo il valore della pendenza per attirare l'attenzione senza
-    // dover "leggere" il numero — utile a fine ultra quando la lucidità
+    // dover "leggere" il numero, utile a fine ultra quando la lucidità
     // cala. Sopra GRADE_DANGER_THRESHOLD il colore è più acceso di sopra
     // GRADE_WARNING_THRESHOLD.
     private const GRADE_WARNING_THRESHOLD as Float = 12.0;
     private const GRADE_DANGER_THRESHOLD as Float = 20.0;
+    private const GRADE_HYSTERESIS as Float = 1.5;
+
+    // Soglie di allerta sulla riserva anaerobica residua (in percentuale).
+    private const RESERVE_WARNING_THRESHOLD as Float = 50.0;
+    private const RESERVE_DANGER_THRESHOLD as Float = 25.0;
+    private const RESERVE_HYSTERESIS as Float = 5.0;
+
+    // Soglie di allerta sulla percentuale residua di carboidrati e di
+    // capacità di discesa.
+    private const FUEL_WARNING_THRESHOLD as Float = 40.0;
+    private const FUEL_DANGER_THRESHOLD as Float = 20.0;
+    private const FUEL_HYSTERESIS as Float = 5.0;
+
+    // Soglie di allerta sul tempo al cedimento, in secondi.
+    //
+    // Sono DUE serie diverse, e la ragione è di progetto, non di comodo:
+    // la soglia di allarme deve valere quanto il tempo necessario a
+    // rimediare. Un limite anaerobico si risolve in pochi secondi,
+    // rallentando: tre minuti di preavviso bastano e avanzano. Un
+    // esaurimento di carboidrati richiede di mangiare e aspettare venti
+    // minuti che l'intestino assorba, e le gambe rovinate dalla discesa
+    // non si recuperano affatto: lì tre minuti di preavviso sarebbero
+    // inutili quanto nessun preavviso. Da cui mezz'ora e dieci minuti.
+    private const ANAEROBIC_WARNING_SEC as Float = 180.0;
+    private const ANAEROBIC_DANGER_SEC as Float = 60.0;
+    private const ANAEROBIC_HYSTERESIS_SEC as Float = 15.0;
+    private const SLOW_WARNING_SEC as Float = 1800.0;
+    private const SLOW_DANGER_SEC as Float = 600.0;
+    private const SLOW_HYSTERESIS_SEC as Float = 120.0;
+
+    // Tempo massimo (in secondi) accettato come singolo passo di
+    // integrazione del motore. compute() dovrebbe girare a 1 Hz, ma il
+    // sistema può saltare cicli quando è sotto carico, e info.timerTime
+    // fa un salto netto se l'utente resta in pausa a lungo. Senza questo
+    // tetto, una pausa di venti minuti verrebbe integrata tutta in un
+    // colpo solo e svuoterebbe la riserva istantaneamente.
+    private const MAX_DT_SEC as Float = 5.0;
+
+    // Ogni quanti secondi ricontrolliamo se la calibrazione automatica è
+    // diventata utilizzabile. Serve solo nel caso in cui il motore fosse
+    // partito SENZA modello: appena la calibrazione diventa valida, il
+    // campo smette di mostrare "--" e inizia a funzionare.
+    private const CALIBRATION_CHECK_PERIOD_SEC as Number = 30;
 
     // Distanza (in metri) di riferimento per calcolare il passo: 1000 se
     // l'utente usa unità metriche, 1609.344 (miglio) se usa quelle
@@ -79,16 +168,62 @@ class UltraTrailDashboardView extends WatchUi.DataField {
     private const METERS_PER_KILOMETER as Float = 1000.0;
     private const METERS_PER_MILE as Float = 1609.344;
 
+    // Identificativi dei campi personalizzati scritti nel file FIT.
+    // Connect IQ ne consente al massimo 16 per app: questi sei sono spesi
+    // per lo STATO DEL MODELLO, non per metriche di contorno. È ciò che
+    // permetterà, a posteriori, di ricalibrare i parametri dell'atleta
+    // confrontando la previsione con l'esito reale della gara.
+    private const FIT_FIELD_GAP as Number = 0;
+    private const FIT_FIELD_RESERVE as Number = 1;
+    private const FIT_FIELD_SUSTAIN as Number = 2;
+    private const FIT_FIELD_WORK as Number = 3;
+    private const FIT_FIELD_CS as Number = 4;
+    private const FIT_FIELD_DPRIME as Number = 5;
+    private const FIT_FIELD_CARB as Number = 6;
+    private const FIT_FIELD_ECCENTRIC as Number = 7;
+
     // ------------------------------------------------------------------
     // STATO INTERNO (allocato UNA SOLA VOLTA in initialize())
     // ------------------------------------------------------------------
 
-    // Riferimento al campo personalizzato che scriviamo nel file .FIT.
-    // Nullable per scelta: se createField() dovesse fallire su un
+    // Campi personalizzati scritti nel file .FIT.
+    // Tutti nullable per scelta: se createField() dovesse fallire su un
     // dispositivo/firmware particolare, l'app continua a funzionare come
-    // display (i 4 quadranti restano corretti) invece di andare in crash
-    // alla prima scrittura. Si perde solo la registrazione del GAP nel FIT.
+    // display invece di andare in crash alla prima scrittura. Si perde
+    // solo la registrazione di quel campo nel FIT.
     private var mGapField as FitContributor.Field?;
+    private var mReserveField as FitContributor.Field?;
+    private var mSustainField as FitContributor.Field?;
+    private var mWorkField as FitContributor.Field?;
+    private var mCsField as FitContributor.Field?;
+    private var mDPrimeField as FitContributor.Field?;
+    private var mCarbField as FitContributor.Field?;
+    private var mEccentricField as FitContributor.Field?;
+
+    // I tre modelli fisiologici e la calibrazione automatica.
+    //
+    // Sono deliberatamente separati e indipendenti: ognuno integra il
+    // proprio stato e dichiara il proprio tempo al cedimento, senza sapere
+    // nulla degli altri. È ciò che permette di aggiungerne un quarto
+    // (il carico termico) senza toccare i tre esistenti, e di far cadere
+    // uno dei tre senza che gli altri smettano di funzionare.
+    private var mEngine as EnduranceEngine;
+    private var mCalibration as SpeedCalibration;
+    private var mFuel as FuelModel;
+    private var mEccentric as EccentricModel;
+
+    // Vincolo dominante: quanto manca al primo cedimento e quale sistema
+    // lo impone. Ricalcolati in compute(), letti da updateQuadrant().
+    private var mBindingTtfSec as Float?;
+    private var mBindingKind as Number;
+
+    // Etichette del campo LIMITE, precaricate una sola volta perché
+    // cambiano a ogni secondo insieme al vincolo dominante: ricaricarle
+    // dalle risorse a ogni compute() allocherebbe una stringa al secondo.
+    private var mLabelLimit as String;
+    private var mLabelAnaerobic as String;
+    private var mLabelCarb as String;
+    private var mLabelQuads as String;
 
     // Array circolari a dimensione FISSA per lo storico di quota e
     // distanza, usati per calcolare la pendenza stabilizzata.
@@ -116,12 +251,34 @@ class UltraTrailDashboardView extends WatchUi.DataField {
     private var mSmoothedGradePercent as Float;
     private var mGapPaceSecPerUnit as Float;
 
+    // Passo attuale e frequenza cardiaca dell'ultimo compute(): li teniamo
+    // come campi perché updateQuadrant() ne ha bisogno per qualunque
+    // quadrante l'utente abbia configurato.
+    private var mCurrentPaceSecPerUnit as Float;
+    private var mHasValidPace as Boolean;
+    private var mHeartRate as Number?;
+
     // Diventa true solo dopo il PRIMO GAP calcolato su un passo valido.
     // Finché resta false non scriviamo nulla nel file FIT: scrivere 0.0
     // mentre si è fermi in partenza registrerebbe uno zero come se fosse
     // un dato reale, creando un picco nel grafico di Garmin Connect e
     // falsando le medie dell'attività.
     private var mHasValidGap as Boolean;
+
+    // Valore di info.timerTime (millisecondi) all'ultimo compute(), usato
+    // per ricavare il passo di integrazione reale del motore. Vale -1
+    // finché non abbiamo ancora visto un campione.
+    //
+    // Perché timerTime e non "un secondo per chiamata": timerTime NON
+    // avanza quando il timer dell'attività è in pausa, mentre compute()
+    // continua a essere chiamato. Usarlo come orologio del modello fa sì
+    // che una sosta a un ristoro non consumi riserva anaerobica e non
+    // accumuli lavoro, che è esattamente il comportamento fisiologico
+    // corretto.
+    private var mLastTimerTimeMs as Number;
+
+    // Contatore per il ricontrollo periodico della calibrazione.
+    private var mSecondsSinceCalibrationCheck as Number;
 
     // Distanza di riferimento (in metri) per convertire la velocità in
     // passo: 1000 m per il sistema metrico, 1609.344 m (1 miglio) per
@@ -130,27 +287,22 @@ class UltraTrailDashboardView extends WatchUi.DataField {
     // valore che l'utente ha scelto per tutti gli altri campi Garmin).
     private var mUnitDistanceMeters as Float;
 
-    // Stringhe già formattate e pronte per il disegno: evitano qualunque
-    // allocazione/formattazione dentro onUpdate().
-    private var mPaceStr as String;
-    private var mHrStr as String;
-    private var mGradeStr as String;
-    private var mGapStr as String;
+    // --- Configurazione e stato dei 4 quadranti ------------------------
+    // Tre array paralleli, tutti di lunghezza QUADRANT_COUNT, allocati una
+    // sola volta. L'indice è la posizione sullo schermo:
+    //   0 = alto a sinistra   1 = alto a destra
+    //   2 = basso a sinistra  3 = basso a destra
+    private var mQuadSource as Array<Number>;   // quale grandezza mostrare
+    private var mQuadLabel as Array<String>;    // etichetta già caricata
+    private var mQuadValue as Array<String>;    // valore già formattato
+    private var mQuadLevel as Array<Number>;    // livello di allerta
 
-    // true se lo schermo è tondo o semi-tondo (Fenix7, FR255/265/955/965
-    // sono tutti tondi): serve per applicare un margine di sicurezza extra
+    // true se lo schermo è tondo o semi-tondo (Fenix7, FR955/965 sono
+    // tutti tondi): serve per applicare un margine di sicurezza extra
     // nel disegno, perché sui bordi di uno schermo tondo lo spazio
     // orizzontale/verticale disponibile si restringe rispetto al centro.
     // Letto una sola volta in initialize(), mai in onUpdate().
     private var mIsRoundScreen as Boolean;
-
-    // Etichette dei 4 quadranti: sono FISSE (non cambiano mai durante
-    // l'attività), quindi le carichiamo una sola volta qui in initialize()
-    // invece di ricaricarle ad ogni onUpdate().
-    private var mLabelPace as String;
-    private var mLabelHr as String;
-    private var mLabelGrade as String;
-    private var mLabelGap as String;
 
     // Elenco dei font "numerici" candidati per i valori, dal più grande al
     // più piccolo. In onUpdate() misuriamo la larghezza reale del testo più
@@ -198,26 +350,9 @@ class UltraTrailDashboardView extends WatchUi.DataField {
     function initialize() {
         DataField.initialize();
 
-        // --- Creazione del campo FIT personalizzato -------------------
-        // createField(nomeInterno, id, tipoDato, opzioni)
-        //   - etichetta        : letta da resources/strings/strings.xml
-        //                        (GapFieldLabel), così il nome che compare
-        //                        nei grafici di Garmin Connect/Strava resta
-        //                        in un unico punto centralizzato e traducibile
-        //   - 0                : id numerico del campo, deve essere unico
-        //                        all'interno di QUESTA app (0 va benissimo
-        //                        perché è il nostro unico campo custom)
-        //   - DATA_TYPE_FLOAT  : il GAP lo salviamo come numero decimale
-        //   - :mesgType        : MESG_TYPE_RECORD = un valore ogni
-        //                        secondo, così Garmin Connect/Strava
-        //                        possono disegnarci sopra un grafico
-        //   - :units           : etichetta unità mostrata nei grafici,
-        //                        coerente con le unità di misura scelte
-        //                        dall'utente sul dispositivo (km o miglia)
-        //
-        // Leggiamo le unità di misura PRIMA di creare il campo, perché ci
-        // servono sia per l'etichetta ":units" sia per tutte le conversioni
-        // di passo fatte in compute().
+        // Leggiamo le unità di misura PRIMA di creare i campi FIT, perché
+        // ci servono sia per le etichette ":units" sia per tutte le
+        // conversioni di passo fatte in compute().
         if (System.getDeviceSettings().paceUnits == System.UNIT_STATUTE) {
             mUnitDistanceMeters = METERS_PER_MILE;
         } else {
@@ -225,19 +360,50 @@ class UltraTrailDashboardView extends WatchUi.DataField {
         }
         var paceUnitLabel = (mUnitDistanceMeters == METERS_PER_MILE) ? "min/mi" : "min/km";
 
-        var gapFieldLabel = WatchUi.loadResource(Rez.Strings.GapFieldLabel) as String;
-        try {
-            mGapField = createField(
-                gapFieldLabel,
-                0,
-                FitContributor.DATA_TYPE_FLOAT,
-                { :mesgType => FitContributor.MESG_TYPE_RECORD, :units => paceUnitLabel }
-            ) as FitContributor.Field;
-        } catch (ex) {
-            // Nessuna registrazione FIT disponibile: l'app resta comunque
-            // pienamente utilizzabile come display a schermo.
-            mGapField = null;
-        }
+        // --- Creazione dei campi FIT personalizzati -------------------
+        // MESG_TYPE_RECORD = un valore ogni secondo, così Garmin Connect e
+        // Strava possono disegnarci sopra un grafico.
+        // MESG_TYPE_SESSION = un unico valore per l'intera attività, adatto
+        // ai parametri dell'atleta, che non cambiano secondo per secondo.
+        mGapField = makeField(
+            WatchUi.loadResource(Rez.Strings.GapFieldLabel) as String,
+            FIT_FIELD_GAP, FitContributor.DATA_TYPE_FLOAT,
+            FitContributor.MESG_TYPE_RECORD, paceUnitLabel);
+
+        mReserveField = makeField(
+            WatchUi.loadResource(Rez.Strings.ReserveFieldLabel) as String,
+            FIT_FIELD_RESERVE, FitContributor.DATA_TYPE_UINT8,
+            FitContributor.MESG_TYPE_RECORD, "%");
+
+        mSustainField = makeField(
+            WatchUi.loadResource(Rez.Strings.SustainFieldLabel) as String,
+            FIT_FIELD_SUSTAIN, FitContributor.DATA_TYPE_FLOAT,
+            FitContributor.MESG_TYPE_RECORD, paceUnitLabel);
+
+        mWorkField = makeField(
+            WatchUi.loadResource(Rez.Strings.WorkFieldLabel) as String,
+            FIT_FIELD_WORK, FitContributor.DATA_TYPE_FLOAT,
+            FitContributor.MESG_TYPE_RECORD, "kJ/kg");
+
+        mCsField = makeField(
+            WatchUi.loadResource(Rez.Strings.CsFieldLabel) as String,
+            FIT_FIELD_CS, FitContributor.DATA_TYPE_FLOAT,
+            FitContributor.MESG_TYPE_SESSION, "m/s");
+
+        mDPrimeField = makeField(
+            WatchUi.loadResource(Rez.Strings.DPrimeFieldLabel) as String,
+            FIT_FIELD_DPRIME, FitContributor.DATA_TYPE_FLOAT,
+            FitContributor.MESG_TYPE_SESSION, "m");
+
+        mCarbField = makeField(
+            WatchUi.loadResource(Rez.Strings.CarbFieldLabel) as String,
+            FIT_FIELD_CARB, FitContributor.DATA_TYPE_UINT16,
+            FitContributor.MESG_TYPE_RECORD, "g");
+
+        mEccentricField = makeField(
+            WatchUi.loadResource(Rez.Strings.EccentricFieldLabel) as String,
+            FIT_FIELD_ECCENTRIC, FitContributor.DATA_TYPE_UINT16,
+            FitContributor.MESG_TYPE_RECORD, "m");
 
         // --- Allocazione array a dimensione fissa per lo smoothing -----
         // Allochiamo sempre alla dimensione MASSIMA possibile: la finestra
@@ -252,32 +418,48 @@ class UltraTrailDashboardView extends WatchUi.DataField {
         }
         mHistIndex = 0;
         mHistCount = 0;
-
-        // Legge la finestra di smoothing dalle impostazioni utente
-        // (Garmin Connect Mobile), con fallback sicuro al default.
-        mHistorySize = loadSmoothingWindowSetting();
+        mHistorySize = DEFAULT_HISTORY_SIZE;
 
         mSmoothedGradePercent = 0.0;
         mGapPaceSecPerUnit = 0.0;
+        mCurrentPaceSecPerUnit = 0.0;
+        mHasValidPace = false;
+        mHeartRate = null;
         mHasValidGap = false;
+        mLastTimerTimeMs = -1;
+        mSecondsSinceCalibrationCheck = 0;
 
-        // Valori "placeholder" mostrati finché non arriva il primo dato
-        // valido (es. subito dopo l'avvio dell'attività).
-        mPaceStr = "--:--";
-        mHrStr = "---";
-        mGradeStr = "0.0%";
-        mGapStr = "--:--";
+        // Modelli e calibrazione. La calibrazione carica da sola i record
+        // personali salvati dalle attività precedenti.
+        mEngine = new EnduranceEngine();
+        mCalibration = new SpeedCalibration();
+        mFuel = new FuelModel();
+        mEccentric = new EccentricModel();
 
-        // Etichette dei quadranti: caricate una sola volta dalle risorse.
-        mLabelPace = WatchUi.loadResource(Rez.Strings.LabelPace) as String;
-        mLabelHr = WatchUi.loadResource(Rez.Strings.LabelHeartRate) as String;
-        mLabelGrade = WatchUi.loadResource(Rez.Strings.LabelGrade) as String;
-        mLabelGap = WatchUi.loadResource(Rez.Strings.LabelGap) as String;
+        mBindingTtfSec = null;
+        mBindingKind = BIND_NONE;
+
+        mLabelLimit = WatchUi.loadResource(Rez.Strings.LabelTtf) as String;
+        mLabelAnaerobic = WatchUi.loadResource(Rez.Strings.LabelAnaerobic) as String;
+        mLabelCarb = WatchUi.loadResource(Rez.Strings.LabelCarb) as String;
+        mLabelQuads = WatchUi.loadResource(Rez.Strings.LabelQuads) as String;
+
+        // Array dei quadranti: allocati qui una volta sola, riempiti da
+        // applySettings() insieme a tutte le altre impostazioni utente.
+        mQuadSource = new Array<Number>[QUADRANT_COUNT];
+        mQuadLabel = new Array<String>[QUADRANT_COUNT];
+        mQuadValue = new Array<String>[QUADRANT_COUNT];
+        mQuadLevel = new Array<Number>[QUADRANT_COUNT];
+        for (var q = 0; q < QUADRANT_COUNT; q++) {
+            mQuadSource[q] = q;
+            mQuadLabel[q] = "";
+            mQuadValue[q] = "--";
+            mQuadLevel[q] = LEVEL_NORMAL;
+        }
 
         // Rileviamo la forma dello schermo una sola volta: tutti i device
-        // target (Fenix7, FR255/265/955/965) sono tondi o semi-tondi, ma
-        // teniamo il codice generico nel caso l'app venga estesa in futuro
-        // a dispositivi con schermo rettangolare.
+        // target sono tondi o semi-tondi, ma teniamo il codice generico nel
+        // caso l'app venga estesa a dispositivi con schermo rettangolare.
         var screenShape = System.getDeviceSettings().screenShape;
         mIsRoundScreen = (screenShape == System.SCREEN_SHAPE_ROUND)
             || (screenShape == System.SCREEN_SHAPE_SEMI_ROUND);
@@ -286,7 +468,7 @@ class UltraTrailDashboardView extends WatchUi.DataField {
         //
         // ATTENZIONE se si modifica questa lista: i font numerici
         // (FONT_NUMBER_*) contengono un set ridotto di glifi, storicamente
-        // limitato a cifre, ':', '.' e '-'. La stringa della pendenza usa
+        // limitato a cifre, ':', '.' e '-'. Le stringhe dei quadranti usano
         // anche '%' e '+', che su alcuni firmware potrebbero non essere
         // presenti nel font numerico. FONT_NUMBER_MILD è stato verificato
         // visivamente su Fenix 7, Forerunner 170 ed Enduro 3 (MIP e AMOLED)
@@ -317,45 +499,75 @@ class UltraTrailDashboardView extends WatchUi.DataField {
         mCachedValueFont = Graphics.FONT_NUMBER_MILD;
         mCachedLayoutWidth = 0;
         mCachedLayoutHeight = 0;
+
+        // Carica tutte le impostazioni utente e configura il motore.
+        applySettings();
     }
 
     // ------------------------------------------------------------------
-    // Legge la proprietà "SmoothingWindowSeconds" impostata dall'utente in
-    // Garmin Connect Mobile e la valida, riportandola sempre nel range
-    // [MIN_HISTORY_SIZE, MAX_HISTORY_SIZE]. Se la proprietà non è ancora
-    // stata impostata (es. prima installazione) o ha un valore inatteso,
-    // usiamo il default sicuro invece di far fallire l'app.
+    // Crea un campo FIT personalizzato senza poter far crashare l'app.
+    //
+    // Riceve 5 argomenti, ben sotto il limite di 9 imposto dalla VM Monkey C
+    // dei dispositivi meno recenti.
     // ------------------------------------------------------------------
-    private function loadSmoothingWindowSetting() as Number {
-        // getValue() solleva un'eccezione se la chiave non esiste (es. se
-        // in futuro venisse rinominata in properties.xml senza aggiornare
-        // qui): la intercettiamo per non far crashare l'app all'avvio.
-        var rawValue = null;
+    private function makeField(
+        label as String,
+        fieldId as Number,
+        dataType as FitContributor.DataType,
+        mesgType as FitContributor.MessageType,
+        units as String
+    ) as FitContributor.Field? {
         try {
-            rawValue = Properties.getValue("SmoothingWindowSeconds");
+            return createField(
+                label, fieldId, dataType,
+                { :mesgType => mesgType, :units => units }
+            ) as FitContributor.Field;
         } catch (ex) {
-            return DEFAULT_HISTORY_SIZE;
+            // Nessuna registrazione FIT per questo campo: l'app resta
+            // pienamente utilizzabile come display a schermo.
+            return null;
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Legge una proprietà numerica dalle impostazioni utente riportandola
+    // sempre in un intervallo valido. getValue() solleva un'eccezione se
+    // la chiave non esiste (es. se venisse rinominata in properties.xml
+    // senza aggiornare il codice): la intercettiamo per non far crashare
+    // l'app all'avvio.
+    //
+    // Riceve 4 argomenti: sotto il limite di 9 dei device meno recenti.
+    // ------------------------------------------------------------------
+    private function readNumberSetting(
+        key as String,
+        fallback as Number,
+        minValue as Number,
+        maxValue as Number
+    ) as Number {
+        var raw = null;
+        try {
+            raw = Properties.getValue(key);
+        } catch (ex) {
+            return fallback;
         }
 
-        if (rawValue == null || !(rawValue instanceof Number)) {
-            return DEFAULT_HISTORY_SIZE;
+        if (raw == null || !(raw instanceof Number)) {
+            return fallback;
         }
 
-        var value = rawValue as Number;
-        if (value < MIN_HISTORY_SIZE) {
-            return MIN_HISTORY_SIZE;
+        var value = raw as Number;
+        if (value < minValue) {
+            return minValue;
         }
-        if (value > MAX_HISTORY_SIZE) {
-            return MAX_HISTORY_SIZE;
+        if (value > maxValue) {
+            return maxValue;
         }
         return value;
     }
 
     // ------------------------------------------------------------------
-    // applySettings(): ricarica la finestra di smoothing dalle impostazioni
-    // utente e azzera lo storico (mischiare campioni raccolti con una
-    // finestra diversa da quella nuova darebbe una pendenza incoerente per
-    // i primi secondi).
+    // applySettings(): ricarica TUTTE le impostazioni utente e riconfigura
+    // di conseguenza smoothing, quadranti e motore fisiologico.
     //
     // ATTENZIONE: questo metodo NON è un callback di sistema. Il callback
     // onSettingsChanged() appartiene a Application.AppBase, non a
@@ -364,8 +576,188 @@ class UltraTrailDashboardView extends WatchUi.DataField {
     // ricevere l'evento e a invocare questo metodo sulla View.
     // ------------------------------------------------------------------
     function applySettings() as Void {
-        mHistorySize = loadSmoothingWindowSetting();
-        resetGradeHistory();
+        // --- Finestra di smoothing della pendenza ---------------------
+        var newHistorySize = readNumberSetting(
+            "SmoothingWindowSeconds", DEFAULT_HISTORY_SIZE,
+            MIN_HISTORY_SIZE, MAX_HISTORY_SIZE);
+
+        // Azzeriamo lo storico solo se la finestra è DAVVERO cambiata:
+        // applySettings() viene richiamata anche per modifiche che non
+        // c'entrano nulla (per esempio un quadrante diverso), e buttare via
+        // il buffer a metà gara costringerebbe a ricostruire la pendenza da
+        // zero per una manciata di secondi senza alcun motivo.
+        if (newHistorySize != mHistorySize) {
+            mHistorySize = newHistorySize;
+            resetGradeHistory();
+        }
+
+        // --- Sorgenti dei 4 quadranti ---------------------------------
+        loadQuadrantSetting(0, "Quadrant1", SRC_PACE);
+        loadQuadrantSetting(1, "Quadrant2", SRC_HR);
+        loadQuadrantSetting(2, "Quadrant3", SRC_GRADE);
+        loadQuadrantSetting(3, "Quadrant4", SRC_GAP);
+
+        // --- Azzeramento calibrazione su richiesta --------------------
+        // L'impostazione è un interruttore che si "riarma" da solo: appena
+        // la vediamo attiva cancelliamo i record e la riportiamo a false,
+        // così l'utente non deve ricordarsi di spegnerla e la prossima
+        // attività non riparte a calibrazione azzerata senza volerlo.
+        var resetRequested = false;
+        try {
+            var raw = Properties.getValue("ResetCalibration");
+            resetRequested = (raw != null) && (raw instanceof Boolean) && (raw as Boolean);
+        } catch (ex) {
+            resetRequested = false;
+        }
+        if (resetRequested) {
+            mCalibration.clear();
+            try {
+                Properties.setValue("ResetCalibration", false);
+            } catch (ex) {
+                // Se non riusciamo a riarmare l'interruttore, il peggio che
+                // succede è un secondo azzeramento al prossimo avvio.
+            }
+        }
+
+        // --- Parametri dell'atleta per il motore ----------------------
+        configureModels();
+    }
+
+    // ------------------------------------------------------------------
+    // Legge la sorgente configurata per un quadrante e ne carica
+    // l'etichetta. Un valore fuori range (impostazione di una versione
+    // futura, o file di configurazione corrotto) ricade sul default invece
+    // di far saltare l'app.
+    // ------------------------------------------------------------------
+    private function loadQuadrantSetting(index as Number, key as String, fallback as Number) as Void {
+        var source = readNumberSetting(key, fallback, 0, SRC_COUNT - 1);
+        mQuadSource[index] = source;
+        mQuadLabel[index] = loadSourceLabel(source);
+        mQuadValue[index] = "--";
+        mQuadLevel[index] = LEVEL_NORMAL;
+        mLayoutDirty = true;
+    }
+
+    // ------------------------------------------------------------------
+    // Etichetta breve da mostrare sopra il valore di un quadrante.
+    // Caricata dalle risorse SOLO qui (all'avvio o al cambio impostazioni),
+    // mai in onUpdate(): loadResource() alloca una stringa nuova ogni volta.
+    // ------------------------------------------------------------------
+    private function loadSourceLabel(source as Number) as String {
+        switch (source) {
+            case SRC_HR:
+                return WatchUi.loadResource(Rez.Strings.LabelHeartRate) as String;
+            case SRC_GRADE:
+                return WatchUi.loadResource(Rez.Strings.LabelGrade) as String;
+            case SRC_GAP:
+                return WatchUi.loadResource(Rez.Strings.LabelGap) as String;
+            case SRC_RESERVE:
+                return WatchUi.loadResource(Rez.Strings.LabelReserve) as String;
+            case SRC_SUSTAIN:
+                return WatchUi.loadResource(Rez.Strings.LabelSustain) as String;
+            // Le tre seguenti sono già in memoria: servono anche al campo
+            // LIMITE, che cambia etichetta a ogni secondo in base al
+            // vincolo dominante e non può permettersi una loadResource() al
+            // secondo. Restituiamo il riferimento, non una copia.
+            case SRC_TTF:
+                return mLabelLimit;
+            case SRC_CARB:
+                return mLabelCarb;
+            case SRC_QUADS:
+                return mLabelQuads;
+            default:
+                return WatchUi.loadResource(Rez.Strings.LabelPace) as String;
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Legge dalle impostazioni tutti i parametri dell'atleta e li distribuisce
+    // ai tre modelli: massa e piano di alimentazione al bilancio dei
+    // carboidrati, capacità di discesa al modello eccentrico, velocità
+    // critica e durabilità al motore aerobico.
+    //
+    // ORDINE DI PRIORITÀ per la velocità critica:
+    //   1. la calibrazione automatica, se ha raccolto dati sufficienti
+    //   2. il passo soglia inserito a mano dall'utente, se presente
+    //   3. nessuno dei due: il motore si dichiara non pronto e i quadranti
+    //      che dipendono da lui mostrano "--"
+    //
+    // La calibrazione viene prima del valore inserito a mano perché nasce
+    // dalle prestazioni reali dell'atleta su questo terreno, mentre il
+    // passo soglia digitato è quasi sempre un ricordo di una gara su strada.
+    // ------------------------------------------------------------------
+    private function configureModels() as Void {
+        // --- Bilancio dei carboidrati ----------------------------------
+        // La massa corporea è un'impostazione e non una lettura dal profilo
+        // utente Garmin per una ragione precisa: leggere il profilo
+        // richiederebbe il permesso "UserProfile", che l'app oggi non
+        // chiede. Aggiungerlo a un'app già pubblicata cambia l'elenco dei
+        // permessi mostrato nello store a un pubblico a cui promettiamo che
+        // nulla lascia l'orologio. Un campo numerico in più costa meno.
+        var massKg = readNumberSetting("BodyMassKg", 70, 35, 150);
+        var carbIntake = readNumberSetting("CarbIntakeGramsPerHour", 60, 0, 120);
+        mFuel.setAthlete(massKg.toFloat(), carbIntake.toFloat());
+
+        // --- Capacità di discesa ----------------------------------------
+        var descentCapacity = readNumberSetting("DescentCapacityMeters", 3000, 500, 15000);
+        mEccentric.setCapacity(descentCapacity.toFloat());
+
+        // --- Motore aerobico --------------------------------------------
+        // Fattore di durabilità: percentuale di velocità sostenibile persa
+        // ogni 100 kJ/kg di lavoro accumulato. 0 disattiva il decadimento.
+        var durabilityPercent = readNumberSetting("DurabilityPercent", 8, 0, 25);
+        var durabilityFactor = durabilityPercent / 100.0;
+
+        if (mCalibration.isValid()) {
+            mEngine.setAthlete(
+                mCalibration.getCriticalSpeed(),
+                mCalibration.getDPrime(),
+                durabilityFactor);
+            return;
+        }
+
+        // Passo soglia inserito dall'utente, in secondi per unità di
+        // distanza del dispositivo (secondi/km per chi usa il sistema
+        // metrico, secondi/miglio per chi usa quello imperiale).
+        // 0 significa "non impostato".
+        var thresholdPace = readNumberSetting("ThresholdPaceSeconds", 0, 0, 1200);
+        if (thresholdPace > 0) {
+            // setAthlete() rifiuta da sé le velocità implausibili, quindi
+            // un valore assurdo digitato per errore non produce un modello
+            // sbagliato: produce nessun modello, e i quadranti restano "--".
+            mEngine.setAthlete(
+                mUnitDistanceMeters / thresholdPace,
+                mEngine.defaultDPrime(),
+                durabilityFactor);
+            return;
+        }
+
+        // Nessuna fonte disponibile: motore non pronto.
+        mEngine.setAthlete(0.0, mEngine.defaultDPrime(), durabilityFactor);
+    }
+
+    // ------------------------------------------------------------------
+    // onTimerStop(): callback di DataField, invocato quando l'utente ferma
+    // il timer dell'attività. È il momento giusto per salvare i record
+    // personali della calibrazione: l'attività è finita, e scrivere in
+    // memoria flash qui costa una volta sola invece che ogni secondo.
+    // ------------------------------------------------------------------
+    function onTimerStop() as Void {
+        mCalibration.save();
+    }
+
+    // ------------------------------------------------------------------
+    // Rete di sicurezza per il salvataggio dei record: invocata da
+    // UltraTrailDashboardApp.onStop(), cioè alla chiusura dell'app.
+    //
+    // onTimerStop() copre il caso normale (l'utente ferma il timer e salva
+    // l'attività), ma non tutti: se l'utente chiude l'attività da un menu,
+    // o se il sistema termina l'app perché sta finendo la batteria, quel
+    // callback può non arrivare mai. save() non fa nulla se non c'è niente
+    // di nuovo da scrivere, quindi chiamarla due volte non costa nulla.
+    // ------------------------------------------------------------------
+    function persistCalibration() as Void {
+        mCalibration.save();
     }
 
     // ------------------------------------------------------------------
@@ -378,18 +770,43 @@ class UltraTrailDashboardView extends WatchUi.DataField {
     // NEGATIVO e non supererebbe mai MIN_DISTANCE_FOR_GRADE, lasciando la
     // pendenza congelata sull'ultimo valore della corsa precedente fino al
     // completo riempimento del buffer (fino a 30 secondi).
+    //
+    // Vale lo stesso per motore e calibrazione: lavoro accumulato e riserva
+    // anaerobica sono grandezze della SINGOLA attività e vanno azzerate,
+    // mentre i record personali della calibrazione sopravvivono (sono la
+    // memoria di lungo periodo dell'atleta, non della corsa).
     // ------------------------------------------------------------------
     function onTimerReset() as Void {
         resetGradeHistory();
 
         mSmoothedGradePercent = 0.0;
         mGapPaceSecPerUnit = 0.0;
+        mCurrentPaceSecPerUnit = 0.0;
+        mHasValidPace = false;
+        mHeartRate = null;
         mHasValidGap = false;
+        mLastTimerTimeMs = -1;
+        mSecondsSinceCalibrationCheck = 0;
 
-        mPaceStr = "--:--";
-        mHrStr = "---";
-        mGradeStr = "0.0%";
-        mGapStr = "--:--";
+        // Salviamo i record prima di ripartire: se l'utente resetta senza
+        // essere passato da uno stop del timer, li perderemmo.
+        mCalibration.save();
+        mCalibration.resetSession();
+        mEngine.reset();
+        mFuel.reset();
+        mEccentric.reset();
+
+        mBindingTtfSec = null;
+        mBindingKind = BIND_NONE;
+
+        // La calibrazione può essere diventata valida durante l'attività
+        // appena conclusa: applichiamola prima che ne inizi una nuova.
+        configureModels();
+
+        for (var q = 0; q < QUADRANT_COUNT; q++) {
+            mQuadValue[q] = "--";
+            mQuadLevel[q] = LEVEL_NORMAL;
+        }
         mLayoutDirty = true;
     }
 
@@ -405,12 +822,26 @@ class UltraTrailDashboardView extends WatchUi.DataField {
 
     // ------------------------------------------------------------------
     // compute(info): chiamato 1 volta al secondo dal sistema.
-    // Qui aggiorniamo lo storico, calcoliamo pendenza e GAP, e scriviamo
-    // il valore nel file FIT.
     // ------------------------------------------------------------------
     function compute(info as Activity.Info) as Numeric or Toybox.Time.Duration or String or Null {
 
-        // --- 1) Aggiornamento storico quota/distanza -------------------
+        // --- 1) Passo di integrazione reale ----------------------------
+        // Vedi il commento su mLastTimerTimeMs: usiamo l'orologio del timer
+        // dell'attività, non il conteggio delle chiamate, così le pause non
+        // vengono integrate nel modello.
+        var dt = 0.0;
+        var timerTime = info.timerTime;
+        if (timerTime != null) {
+            if (mLastTimerTimeMs >= 0 && timerTime > mLastTimerTimeMs) {
+                dt = (timerTime - mLastTimerTimeMs) / 1000.0;
+                if (dt > MAX_DT_SEC) {
+                    dt = MAX_DT_SEC;
+                }
+            }
+            mLastTimerTimeMs = timerTime;
+        }
+
+        // --- 2) Aggiornamento storico quota/distanza -------------------
         // Aggiorniamo l'array circolare solo se il dispositivo fornisce
         // sia la quota (altimetro barometrico) sia la distanza percorsa.
         //
@@ -434,7 +865,7 @@ class UltraTrailDashboardView extends WatchUi.DataField {
             }
         }
 
-        // --- 2) Calcolo della pendenza stabilizzata (media mobile) ----
+        // --- 3) Calcolo della pendenza stabilizzata (media mobile) ----
         // Confrontiamo il campione più vecchio nella finestra con quello
         // più recente: la pendenza media sull'intera finestra è molto
         // più stabile della pendenza "istantanea" nativa di Garmin.
@@ -460,7 +891,7 @@ class UltraTrailDashboardView extends WatchUi.DataField {
             // valore valido: niente "sbalzi" a zero quando ci si ferma.
         }
 
-        // --- 3) Passo attuale (da velocità istantanea) ------------------
+        // --- 4) Passo attuale (da velocità istantanea) ------------------
         // mUnitDistanceMeters vale 1000 (km) o 1609.344 (miglio) a seconda
         // delle unità di misura scelte dall'utente sul dispositivo: il
         // resto del calcolo (GAP, formattazione) non deve sapere quale
@@ -468,53 +899,103 @@ class UltraTrailDashboardView extends WatchUi.DataField {
         // Anche qui la velocità viene copiata in una locale prima del
         // controllo di nullità: senza la copia, la divisione userebbe una
         // seconda lettura della proprietà, non coperta dal controllo.
-        var currentPaceSecPerUnit = 0.0;
-        var hasValidPace = false;
+        mHasValidPace = false;
         var currentSpeed = info.currentSpeed;
         if (currentSpeed != null && currentSpeed > 0.1) {
-            currentPaceSecPerUnit = mUnitDistanceMeters / currentSpeed;
-            hasValidPace = true;
+            mCurrentPaceSecPerUnit = mUnitDistanceMeters / currentSpeed;
+            mHasValidPace = true;
         }
 
-        // --- 4) Calcolo del GAP (Grade Adjusted Pace) ------------------
-        // La formula di Minetti lavora su un RAPPORTO di costi energetici,
-        // quindi il risultato è corretto qualunque sia l'unità di distanza
-        // usata per il passo in ingresso (km o miglio).
-        if (hasValidPace) {
-            mGapPaceSecPerUnit = calculateGap(currentPaceSecPerUnit, mSmoothedGradePercent);
+        var gradeFraction = mSmoothedGradePercent / 100.0;
+
+        // --- 5) Calcolo del GAP (Grade Adjusted Pace) ------------------
+        // Il GAP MOSTRATO usa il modello di Minetti puro, senza alcuna
+        // attenuazione: è una scelta esplicita di fedeltà al modello
+        // scientifico, anche quando il numero risulta aggressivo (su una
+        // discesa ripida il GAP può avvicinarsi al doppio del passo reale).
+        //
+        // La formula lavora su un RAPPORTO di costi energetici, quindi il
+        // risultato è corretto qualunque sia l'unità di distanza usata per
+        // il passo in ingresso (km o miglio).
+        if (mHasValidPace) {
+            mGapPaceSecPerUnit = mCurrentPaceSecPerUnit / MinettiCost.ratio(gradeFraction);
             mHasValidGap = true;
         }
 
-        // --- 5) Scrittura del valore nel file FIT -----------------------
-        // Salviamo il GAP in minuti per unità (float): l'etichetta ":units"
-        // dichiarata in createField() (min/km o min/mi) riflette la stessa
-        // unità usata qui, così i grafici su Garmin Connect/Strava restano
-        // coerenti con le impostazioni dell'utente.
-        //
+        // --- 6) Aggiornamento del motore fisiologico --------------------
+        // Il MOTORE, a differenza del GAP mostrato, usa il rapporto con il
+        // tetto in salita (MinettiCost.modelRatio): senza di esso ogni muro
+        // ripido affrontato camminando verrebbe letto come uno sforzo
+        // enormemente sopra soglia. Vedi il commento esteso in
+        // MinettiCost.mc. Il valore a schermo resta comunque Minetti puro:
+        // le due cose sono indipendenti.
+        // La condizione è "velocità DISPONIBILE", non "velocità maggiore di
+        // zero": stare fermi a un ristoro con il timer avviato è a tutti gli
+        // effetti recupero, e il modello deve ricaricare la riserva. Saltare
+        // l'aggiornamento a velocità nulla congelerebbe il bilancio proprio
+        // nei minuti in cui l'atleta sta recuperando di più. Resta invece
+        // corretto non fare nulla quando currentSpeed è null (GPS non ancora
+        // agganciato): lì non sappiamo se è fermo, non sappiamo e basta.
+        if (dt > 0.0 && currentSpeed != null) {
+            var modelSpeed = currentSpeed * MinettiCost.modelRatio(gradeFraction);
+            mEngine.update(modelSpeed, dt);
+            mCalibration.update(modelSpeed, dt);
+
+            // Il bilancio dei carboidrati dipende dall'intensità RELATIVA
+            // alla velocità sostenibile: senza velocità critica non sappiamo
+            // quale frazione dell'energia venga dagli zuccheri, quindi il
+            // modello resta fermo invece di ipotizzare. Il consumo si legge
+            // direttamente dalla velocità equivalente in piano, perché per
+            // costruzione C(i)*v vale C(0)*vGap.
+            var sustainable = mEngine.getSustainableSpeed();
+            if (mEngine.hasModel() && sustainable > 0.0) {
+                mFuel.update(
+                    MinettiCost.FLAT_COST * modelSpeed,
+                    modelSpeed / sustainable,
+                    dt);
+            }
+
+            // Il danno da discesa usa la velocità REALE sul terreno, non
+            // quella equivalente in piano: qui conta il movimento del corpo
+            // e la forza che i quadricipiti devono assorbire, non il costo
+            // aerobico. Ed è l'unico dei tre modelli che non ha bisogno di
+            // alcuna calibrazione: funziona dal primo secondo.
+            mEccentric.update(currentSpeed, gradeFraction, dt);
+
+            // Se il motore è partito senza modello (nessun record salvato e
+            // nessun passo soglia impostato), ricontrolliamo ogni tanto se
+            // la calibrazione è nel frattempo diventata utilizzabile.
+            if (!mEngine.hasModel()) {
+                mSecondsSinceCalibrationCheck += 1;
+                if (mSecondsSinceCalibrationCheck >= CALIBRATION_CHECK_PERIOD_SEC) {
+                    mSecondsSinceCalibrationCheck = 0;
+                    if (mCalibration.isValid()) {
+                        configureModels();
+                    }
+                }
+            }
+        }
+
+        // --- 7) Scrittura dei valori nel file FIT -----------------------
         // Scriviamo SOLO dopo aver calcolato almeno un GAP valido: prima di
         // allora il valore sarebbe 0.0, che verrebbe registrato come un dato
         // reale (picco a zero nel grafico e medie falsate) invece che come
         // "dato non disponibile". Da fermi con il timer avviato il campo
-        // conserva l'ultimo GAP valido: non esiste un modo di scrivere un
+        // conserva l'ultimo valore valido: non esiste un modo di scrivere un
         // valore "invalido" via setData(), che accetta solo il tipo
         // dichiarato in createField() e altrimenti solleva un'eccezione.
-        var gapField = mGapField;
-        if (gapField != null && mHasValidGap) {
-            gapField.setData(mGapPaceSecPerUnit / 60.0);
-        }
+        writeFitFields();
 
-        // --- 6) Pre-formattazione delle stringhe per il disegno --------
+        // --- 8) Vincolo dominante ---------------------------------------
+        updateBindingConstraint();
+
+        // --- 9) Pre-formattazione delle stringhe per il disegno --------
         // Facciamo qui il lavoro "costoso" di formattazione, così
         // onUpdate() dovrà solo disegnare stringhe già pronte.
-        //
-        // Segnaliamo con mLayoutDirty se una stringa è cambiata davvero:
-        // solo in quel caso onUpdate() dovrà rimisurare i font (vedi la
-        // cache del layout più avanti).
-        var currentHeartRate = info.currentHeartRate;
-        setPaceStr(hasValidPace ? formatPace(currentPaceSecPerUnit) : "--:--");
-        setHrStr((currentHeartRate != null) ? currentHeartRate.toString() : "---");
-        setGradeStr(formatGrade(mSmoothedGradePercent));
-        setGapStr(hasValidPace ? formatPace(mGapPaceSecPerUnit) : "--:--");
+        mHeartRate = info.currentHeartRate;
+        for (var q = 0; q < QUADRANT_COUNT; q++) {
+            updateQuadrant(q);
+        }
 
         // Il valore restituito viene usato solo come fallback se il
         // sistema dovesse mostrare questo campo in un layout semplice
@@ -529,92 +1010,332 @@ class UltraTrailDashboardView extends WatchUi.DataField {
     }
 
     // ------------------------------------------------------------------
-    // Setter delle 4 stringhe visualizzate. Aggiornano il valore solo se è
-    // effettivamente cambiato e, in quel caso, marcano il layout come da
-    // ricalcolare: è ciò che permette a onUpdate() di saltare le misure dei
-    // font quando non serve rifarle.
+    // Determina quale sistema fisiologico cederà per primo e fra quanto.
+    //
+    // Ogni modello dichiara il proprio tempo al cedimento, oppure null se
+    // al ritmo attuale non sta andando verso alcun limite (sotto soglia la
+    // riserva anaerobica si ricarica, in salita le gambe non peggiorano,
+    // mangiando abbastanza i carboidrati non calano). Il vincolo è
+    // semplicemente il minimo tra quelli dichiarati.
+    //
+    // Questa è la scelta di progetto centrale dell'app: la valuta comune
+    // tra sistemi diversi è il TEMPO, non un punteggio. Un indice che
+    // moltiplichi fra loro riserva, glicogeno e danno muscolare produce un
+    // numero che non si può verificare contro nulla e che non dice cosa
+    // fare. Un tempo al cedimento, invece, a fine gara si confronta con
+    // quello che è successo davvero, e il nome del sistema che lo impone
+    // corrisponde a un'azione precisa: rallentare, mangiare, o frenare meno.
     // ------------------------------------------------------------------
-    private function setPaceStr(value as String) as Void {
-        if (!value.equals(mPaceStr)) {
-            mPaceStr = value;
-            mLayoutDirty = true;
+    private function updateBindingConstraint() as Void {
+        var best = null;
+        var kind = BIND_NONE;
+
+        var anaerobic = mEngine.getTimeToFailureSec();
+        if (anaerobic != null) {
+            best = anaerobic;
+            kind = BIND_ANAEROBIC;
+        }
+
+        var carb = mFuel.getTimeToDepletionSec();
+        if (carb != null && (best == null || carb < best)) {
+            best = carb;
+            kind = BIND_CARB;
+        }
+
+        var quads = mEccentric.getTimeToLimitSec();
+        if (quads != null && (best == null || quads < best)) {
+            best = quads;
+            kind = BIND_QUADS;
+        }
+
+        mBindingTtfSec = best;
+        mBindingKind = kind;
+    }
+
+    // ------------------------------------------------------------------
+    // Etichetta da mostrare sul campo LIMITE: il nome del sistema che sta
+    // vincolando. Restituisce un riferimento a una stringa già in memoria,
+    // quindi non alloca nulla nemmeno venendo chiamata a ogni secondo.
+    // ------------------------------------------------------------------
+    private function bindingLabel() as String {
+        if (mBindingKind == BIND_ANAEROBIC) {
+            return mLabelAnaerobic;
+        }
+        if (mBindingKind == BIND_CARB) {
+            return mLabelCarb;
+        }
+        if (mBindingKind == BIND_QUADS) {
+            return mLabelQuads;
+        }
+        return mLabelLimit;
+    }
+
+    // ------------------------------------------------------------------
+    // Scrive nel file FIT lo stato del modello. Chiamata da compute(),
+    // una volta al secondo.
+    //
+    // Perché registriamo lo STATO e non i valori mostrati: i campi a
+    // schermo si ricavano dallo stato, ma non viceversa. Salvare velocità
+    // sostenibile, riserva e lavoro accumulato è ciò che permetterà, a
+    // posteriori, di confrontare quanto il modello aveva previsto con come
+    // è andata davvero, e di correggere i parametri dell'atleta di
+    // conseguenza. Un campo puramente estetico non lo consentirebbe.
+    // ------------------------------------------------------------------
+    private function writeFitFields() as Void {
+        var gapField = mGapField;
+        if (gapField != null && mHasValidGap) {
+            gapField.setData(mGapPaceSecPerUnit / 60.0);
+        }
+
+        // Il carico eccentrico si registra sempre: è l'unico modello che non
+        // dipende dalla velocità critica, quindi è disponibile anche alla
+        // primissima uscita, quando la calibrazione non ha ancora dati.
+        var eccentricField = mEccentricField;
+        if (eccentricField != null) {
+            eccentricField.setData(Math.round(mEccentric.getEquivalentMeters()).toNumber());
+        }
+
+        if (!mEngine.hasModel()) {
+            return;
+        }
+
+        var carbField = mCarbField;
+        if (carbField != null) {
+            carbField.setData(Math.round(mFuel.getRemainingGrams()).toNumber());
+        }
+
+        var reserveField = mReserveField;
+        if (reserveField != null) {
+            // DATA_TYPE_UINT8 accetta solo interi 0-255: la percentuale ci
+            // sta comodamente, e costa un byte per record invece di quattro.
+            reserveField.setData(Math.round(mEngine.getReservePercent()).toNumber());
+        }
+
+        var sustainField = mSustainField;
+        if (sustainField != null) {
+            var sustainSpeed = mEngine.getSustainableSpeed();
+            if (sustainSpeed > 0.0) {
+                sustainField.setData((mUnitDistanceMeters / sustainSpeed) / 60.0);
+            }
+        }
+
+        var workField = mWorkField;
+        if (workField != null) {
+            workField.setData(mEngine.getWorkKjPerKg());
+        }
+
+        // I due campi di sessione descrivono l'atleta, non l'istante: li
+        // riscriviamo comunque a ogni ciclo perché setData() su un campo
+        // MESG_TYPE_SESSION si limita a sovrascrivere il valore in memoria,
+        // che verrà salvato una volta sola alla chiusura della sessione.
+        var csField = mCsField;
+        if (csField != null) {
+            csField.setData(mEngine.getBaseCriticalSpeed());
+        }
+
+        var dPrimeField = mDPrimeField;
+        if (dPrimeField != null) {
+            dPrimeField.setData(mEngine.getDPrime());
         }
     }
 
-    private function setHrStr(value as String) as Void {
-        if (!value.equals(mHrStr)) {
-            mHrStr = value;
-            mLayoutDirty = true;
+    // ------------------------------------------------------------------
+    // Aggiorna testo e livello di allerta di un quadrante, in base alla
+    // sorgente che l'utente gli ha assegnato.
+    //
+    // Il valore viene scritto tramite setQuadValue(), che marca il layout
+    // come da ricalcolare SOLO se la stringa è davvero cambiata: è ciò che
+    // permette a onUpdate() di saltare le misure dei font quando non serve.
+    // ------------------------------------------------------------------
+    private function updateQuadrant(index as Number) as Void {
+        var source = mQuadSource[index];
+
+        switch (source) {
+            case SRC_HR:
+                var hr = mHeartRate;
+                setQuadValue(index, (hr != null) ? hr.toString() : "---");
+                mQuadLevel[index] = LEVEL_NORMAL;
+                break;
+
+            case SRC_GRADE:
+                setQuadValue(index, formatGrade(mSmoothedGradePercent));
+                mQuadLevel[index] = levelAscending(
+                    mSmoothedGradePercent.abs(),
+                    GRADE_WARNING_THRESHOLD, GRADE_DANGER_THRESHOLD,
+                    GRADE_HYSTERESIS, mQuadLevel[index]);
+                break;
+
+            case SRC_GAP:
+                setQuadValue(index, mHasValidPace ? formatPace(mGapPaceSecPerUnit) : "--:--");
+                mQuadLevel[index] = LEVEL_NORMAL;
+                break;
+
+            case SRC_RESERVE:
+                if (mEngine.hasModel()) {
+                    var reserve = mEngine.getReservePercent();
+                    setQuadValue(index, Lang.format("$1$%", [reserve.format("%d")]));
+                    mQuadLevel[index] = levelDescending(
+                        reserve,
+                        RESERVE_WARNING_THRESHOLD, RESERVE_DANGER_THRESHOLD,
+                        RESERVE_HYSTERESIS, mQuadLevel[index]);
+                } else {
+                    setQuadValue(index, "--");
+                    mQuadLevel[index] = LEVEL_NORMAL;
+                }
+                break;
+
+            case SRC_TTF:
+                // Questo quadrante cambia ETICHETTA oltre che valore: mostra
+                // quanto manca al primo cedimento e il nome del sistema che
+                // lo impone. È l'unica parte dell'app che risponde alla
+                // domanda "cosa devo fare adesso" invece che "quanto vale
+                // questa grandezza".
+                var ttf = mBindingTtfSec;
+                if (ttf != null) {
+                    setQuadValue(index, formatDuration(ttf));
+                    mQuadLabel[index] = bindingLabel();
+                    if (mBindingKind == BIND_ANAEROBIC) {
+                        mQuadLevel[index] = levelDescending(
+                            ttf,
+                            ANAEROBIC_WARNING_SEC, ANAEROBIC_DANGER_SEC,
+                            ANAEROBIC_HYSTERESIS_SEC, mQuadLevel[index]);
+                    } else {
+                        mQuadLevel[index] = levelDescending(
+                            ttf,
+                            SLOW_WARNING_SEC, SLOW_DANGER_SEC,
+                            SLOW_HYSTERESIS_SEC, mQuadLevel[index]);
+                    }
+                } else {
+                    // Nessun sistema si sta avvicinando al proprio limite:
+                    // sotto soglia la riserva si ricarica, in salita le gambe
+                    // non peggiorano, e l'alimentazione copre il consumo.
+                    // Mostrare un numero qui sarebbe inventarlo.
+                    setQuadValue(index, "--:--");
+                    mQuadLabel[index] = mLabelLimit;
+                    mQuadLevel[index] = LEVEL_NORMAL;
+                }
+                break;
+
+            case SRC_CARB:
+                // Dipende dalla velocità critica, perché la frazione di
+                // energia che arriva dagli zuccheri si ricava dall'intensità
+                // relativa alla soglia. Senza calibrazione, "--".
+                if (mEngine.hasModel()) {
+                    var carbLeft = mFuel.getRemainingPercent();
+                    setQuadValue(index, Lang.format("$1$%", [carbLeft.format("%d")]));
+                    mQuadLevel[index] = levelDescending(
+                        carbLeft,
+                        FUEL_WARNING_THRESHOLD, FUEL_DANGER_THRESHOLD,
+                        FUEL_HYSTERESIS, mQuadLevel[index]);
+                } else {
+                    setQuadValue(index, "--");
+                    mQuadLevel[index] = LEVEL_NORMAL;
+                }
+                break;
+
+            case SRC_QUADS:
+                // Nessuna dipendenza dalla calibrazione: funziona subito.
+                var quadsLeft = mEccentric.getRemainingPercent();
+                setQuadValue(index, Lang.format("$1$%", [quadsLeft.format("%d")]));
+                mQuadLevel[index] = levelDescending(
+                    quadsLeft,
+                    FUEL_WARNING_THRESHOLD, FUEL_DANGER_THRESHOLD,
+                    FUEL_HYSTERESIS, mQuadLevel[index]);
+                break;
+
+            case SRC_SUSTAIN:
+                var sustainSpeed = mEngine.getSustainableSpeed();
+                if (mEngine.hasModel() && sustainSpeed > 0.0) {
+                    setQuadValue(index, formatPace(mUnitDistanceMeters / sustainSpeed));
+                } else {
+                    setQuadValue(index, "--:--");
+                }
+                mQuadLevel[index] = LEVEL_NORMAL;
+                break;
+
+            default:
+                setQuadValue(index, mHasValidPace ? formatPace(mCurrentPaceSecPerUnit) : "--:--");
+                mQuadLevel[index] = LEVEL_NORMAL;
+                break;
         }
     }
 
-    private function setGradeStr(value as String) as Void {
-        if (!value.equals(mGradeStr)) {
-            mGradeStr = value;
-            mLayoutDirty = true;
-        }
-    }
-
-    private function setGapStr(value as String) as Void {
-        if (!value.equals(mGapStr)) {
-            mGapStr = value;
+    // ------------------------------------------------------------------
+    // Aggiorna il testo di un quadrante solo se è effettivamente cambiato
+    // e, in quel caso, marca il layout come da ricalcolare.
+    // ------------------------------------------------------------------
+    private function setQuadValue(index as Number, value as String) as Void {
+        if (!value.equals(mQuadValue[index])) {
+            mQuadValue[index] = value;
             mLayoutDirty = true;
         }
     }
 
     // ------------------------------------------------------------------
-    // Formula del GAP basata sul modello del costo energetico della corsa
-    // di Minetti et al. (2002).
+    // Livello di allerta quando sono i valori BASSI a essere critici
+    // (riserva anaerobica residua, tempo al cedimento).
     //
-    // C(i) = costo energetico per kg per metro percorso, in funzione
-    // della pendenza "i" (frazione, es. 0.10 = 10% di salita):
+    // L'isteresi non è un dettaglio estetico: senza di essa, un valore che
+    // oscilla attorno a una soglia fa lampeggiare il colore più volte al
+    // secondo. In gara è la differenza tra un campo che si legge a colpo
+    // d'occhio e uno che l'utente disinstalla. Per SCENDERE di gravità
+    // serve superare la soglia di un margine; per salire, no: un
+    // peggioramento va segnalato subito.
     //
-    //   C(i) = 155.4*i^5 - 30.4*i^4 - 43.3*i^3 + 46.3*i^2 + 19.5*i + 3.6
-    //
-    // Il GAP è il passo che, in piano (i=0, dove C(0)=3.6), richiederebbe
-    // lo stesso "sforzo energetico per metro" del passo attuale sulla
-    // pendenza corrente:
-    //
-    //   passoGAP = passoAttuale * C(0) / C(i)
-    //
-    // In salita C(i) > C(0) => passoGAP < passoAttuale (il GAP è più
-    // "veloce" del passo reale, perché in salita si fa più fatica a
-    // parità di velocità). In discesa vale il contrario.
-    //
-    // Nota sulle unità: la funzione è agnostica rispetto all'unità di
-    // distanza (km o miglio) perché applica solo un fattore moltiplicativo
-    // (un rapporto di costi energetici) al passo in ingresso — qualunque
-    // unità abbia paceSecPerUnit, il risultato la eredita correttamente.
+    // Riceve 5 argomenti, sotto il limite di 9 dei device meno recenti.
     // ------------------------------------------------------------------
-    private function calculateGap(paceSecPerUnit as Float, gradePercent as Float) as Float {
-        // Convertiamo la pendenza da percentuale a frazione (es. 12% -> 0.12)
-        var i = gradePercent / 100.0;
-
-        // Limitiamo la pendenza usata nella formula per restare nel range
-        // in cui il modello di Minetti è affidabile (evita risultati
-        // assurdi su pendenze estreme o dati GPS/altimetro rumorosi).
-        if (i > MAX_GRADE_FRACTION) {
-            i = MAX_GRADE_FRACTION;
-        } else if (i < -MAX_GRADE_FRACTION) {
-            i = -MAX_GRADE_FRACTION;
+    private function levelDescending(
+        value as Float,
+        warnAt as Float,
+        dangerAt as Float,
+        margin as Float,
+        current as Number
+    ) as Number {
+        var level = LEVEL_NORMAL;
+        if (value <= dangerAt) {
+            level = LEVEL_DANGER;
+        } else if (value <= warnAt) {
+            level = LEVEL_WARNING;
         }
 
-        var i2 = i * i;
-        var i3 = i2 * i;
-        var i4 = i3 * i;
-        var i5 = i4 * i;
+        if (level < current) {
+            if (current == LEVEL_DANGER && value < dangerAt + margin) {
+                return LEVEL_DANGER;
+            }
+            if (current == LEVEL_WARNING && value < warnAt + margin) {
+                return LEVEL_WARNING;
+            }
+        }
+        return level;
+    }
 
-        var costoPendenza = (155.4 * i5) - (30.4 * i4) - (43.3 * i3) + (46.3 * i2) + (19.5 * i) + 3.6;
-        var costoPiano = 3.6; // C(0)
-
-        // Protezione difensiva: il polinomio non può annullarsi nel range
-        // limitato sopra, ma per sicurezza evitiamo comunque una divisione
-        // per zero.
-        if (costoPendenza < 0.1) {
-            costoPendenza = 0.1;
+    // ------------------------------------------------------------------
+    // Livello di allerta quando sono i valori ALTI a essere critici
+    // (pendenza in valore assoluto). Stessa isteresi, direzione opposta.
+    // ------------------------------------------------------------------
+    private function levelAscending(
+        value as Float,
+        warnAt as Float,
+        dangerAt as Float,
+        margin as Float,
+        current as Number
+    ) as Number {
+        var level = LEVEL_NORMAL;
+        if (value >= dangerAt) {
+            level = LEVEL_DANGER;
+        } else if (value >= warnAt) {
+            level = LEVEL_WARNING;
         }
 
-        return paceSecPerUnit * (costoPiano / costoPendenza);
+        if (level < current) {
+            if (current == LEVEL_DANGER && value > dangerAt - margin) {
+                return LEVEL_DANGER;
+            }
+            if (current == LEVEL_WARNING && value > warnAt - margin) {
+                return LEVEL_WARNING;
+            }
+        }
+        return level;
     }
 
     // ------------------------------------------------------------------
@@ -635,6 +1356,36 @@ class UltraTrailDashboardView extends WatchUi.DataField {
     }
 
     // ------------------------------------------------------------------
+    // Formatta una durata in secondi per il campo LIMITE.
+    //
+    // Sotto l'ora usa "M:SS", che è la forma giusta per un limite
+    // anaerobico: lì contano i secondi. Sopra l'ora passa a "1h20", perché
+    // un esaurimento di carboidrati o di gambe si misura in ore e "82:14"
+    // costringerebbe l'atleta a fare una divisione mentale a metà gara.
+    // Oltre le dieci ore la stima non è più informativa e nemmeno
+    // affidabile: mostriamo un tetto invece di un numero preciso e falso.
+    // ------------------------------------------------------------------
+    private function formatDuration(seconds as Float) as String {
+        if (seconds < 0.0) {
+            return "0:00";
+        }
+        if (seconds >= 35999.0) {
+            return "9h59";
+        }
+
+        var total = Math.round(seconds).toNumber();
+        if (total >= 3600) {
+            var hours = total / 3600;
+            var remainderMinutes = (total % 3600) / 60;
+            return Lang.format("$1$h$2$", [hours, remainderMinutes.format("%02d")]);
+        }
+
+        var minutes = total / 60;
+        var secs = total % 60;
+        return Lang.format("$1$:$2$", [minutes, secs.format("%02d")]);
+    }
+
+    // ------------------------------------------------------------------
     // Formatta la pendenza con un decimale e il segno (+/-).
     // ------------------------------------------------------------------
     private function formatGrade(gradePercent as Float) as String {
@@ -643,7 +1394,7 @@ class UltraTrailDashboardView extends WatchUi.DataField {
 
     // ------------------------------------------------------------------
     // onUpdate(dc): disegna la UI. NESSUN calcolo qui: solo disegno delle
-    // stringhe già pronte (mPaceStr, mHrStr, mGradeStr, mGapStr).
+    // stringhe già pronte in mQuadValue.
     //
     // Ogni quadrante è composto da DUE righe centrate verticalmente:
     // un'etichetta piccola e attenuata sopra ("PASSO", "HR", ...) e il
@@ -741,21 +1492,21 @@ class UltraTrailDashboardView extends WatchUi.DataField {
         }
 
         // La misura vera e propria si fa solo se qualcosa è cambiato: una
-        // delle 4 stringhe (mLayoutDirty, impostato dai setter in compute())
-        // oppure le dimensioni del contesto grafico. Altrimenti riusiamo il
-        // font già calcolato, risparmiando fino a 12 getTextWidthInPixels()
-        // per ogni ridisegno.
+        // delle 4 stringhe (mLayoutDirty, impostato da setQuadValue() in
+        // compute()) oppure le dimensioni del contesto grafico. Altrimenti
+        // riusiamo il font già calcolato, risparmiando fino a 12 chiamate a
+        // getTextWidthInPixels() per ogni ridisegno.
         if (mLayoutDirty || width != mCachedLayoutWidth || height != mCachedLayoutHeight) {
             var chosenFont = mValueFontCandidates[mValueFontCandidates.size() - 1];
             for (var f = 0; f < mValueFontCandidates.size(); f++) {
                 var candidateFont = mValueFontCandidates[f];
-                var widestTextPx = dc.getTextWidthInPixels(mPaceStr, candidateFont);
-                var hrWidthPx = dc.getTextWidthInPixels(mHrStr, candidateFont);
-                if (hrWidthPx > widestTextPx) { widestTextPx = hrWidthPx; }
-                var gradeWidthPx = dc.getTextWidthInPixels(mGradeStr, candidateFont);
-                if (gradeWidthPx > widestTextPx) { widestTextPx = gradeWidthPx; }
-                var gapWidthPx = dc.getTextWidthInPixels(mGapStr, candidateFont);
-                if (gapWidthPx > widestTextPx) { widestTextPx = gapWidthPx; }
+                var widestTextPx = 0;
+                for (var q = 0; q < QUADRANT_COUNT; q++) {
+                    var textPx = dc.getTextWidthInPixels(mQuadValue[q], candidateFont);
+                    if (textPx > widestTextPx) {
+                        widestTextPx = textPx;
+                    }
+                }
 
                 if (widestTextPx <= maxValueWidth) {
                     chosenFont = candidateFont;
@@ -798,32 +1549,24 @@ class UltraTrailDashboardView extends WatchUi.DataField {
         mDrawLabelColor = labelColor;
         mDrawBackgroundColor = backgroundColor;
 
-        // --- Colore di allerta per la pendenza ---------------------------
-        // Sopra una certa pendenza (in salita O in discesa) coloriamo il
-        // valore per renderlo riconoscibile a colpo d'occhio, senza dover
-        // leggere il numero — utile quando si è stanchi durante un'ultra.
-        // .abs() non alloca memoria: è sicuro chiamarlo in onUpdate().
-        var gradeAbs = mSmoothedGradePercent.abs();
-        var gradeValueColor = valueColor;
-        if (gradeAbs >= GRADE_DANGER_THRESHOLD) {
-            gradeValueColor = Graphics.COLOR_RED;
-        } else if (gradeAbs >= GRADE_WARNING_THRESHOLD) {
-            gradeValueColor = Graphics.COLOR_ORANGE;
-        }
-
-        drawQuadrant(dc, leftCenterX, topCenterY, mLabelPace, mPaceStr, valueColor);
-        drawQuadrant(dc, rightCenterX, topCenterY, mLabelHr, mHrStr, valueColor);
-        drawQuadrant(dc, leftCenterX, bottomCenterY, mLabelGrade, mGradeStr, gradeValueColor);
-        drawQuadrant(dc, rightCenterX, bottomCenterY, mLabelGap, mGapStr, valueColor);
+        // I 4 quadranti, nell'ordine: alto-sinistra, alto-destra,
+        // basso-sinistra, basso-destra. Il colore di ciascuno dipende dal
+        // livello di allerta calcolato in compute(): è la traduzione da
+        // numero a giudizio, l'unica parte del "livello decisione" che
+        // arriva davvero all'occhio dell'atleta senza doverla leggere.
+        drawQuadrant(dc, leftCenterX, topCenterY, 0, valueColor);
+        drawQuadrant(dc, rightCenterX, topCenterY, 1, valueColor);
+        drawQuadrant(dc, leftCenterX, bottomCenterY, 2, valueColor);
+        drawQuadrant(dc, rightCenterX, bottomCenterY, 3, valueColor);
     }
 
     // ------------------------------------------------------------------
-    // Disegna una coppia etichetta+valore centrata attorno al punto
-    // (centerX, centerY) di un quadrante. Funzione di sola scrittura sul
-    // Dc: non alloca nulla, riceve solo riferimenti a stringhe e costanti
-    // già pronte, quindi rispetta la regola "niente allocazioni in onUpdate".
+    // Disegna la coppia etichetta+valore di un quadrante, centrata attorno
+    // al punto (centerX, centerY). Funzione di sola scrittura sul Dc: non
+    // alloca nulla, legge solo stringhe e costanti già pronte, quindi
+    // rispetta la regola "niente allocazioni in onUpdate".
     //
-    // Riceve solo 6 argomenti (il MASSIMO consentito dalla VM Monkey C dei
+    // Riceve 5 argomenti (il MASSIMO consentito dalla VM Monkey C dei
     // device meno recenti è 9): tutto ciò che è condiviso tra i 4 quadranti
     // (font, altezze, margine, colori di sfondo/etichetta) viene letto da
     // variabili di istanza invece che passato ogni volta come parametro.
@@ -832,9 +1575,8 @@ class UltraTrailDashboardView extends WatchUi.DataField {
         dc as Graphics.Dc,
         centerX as Number,
         centerY as Number,
-        label as String,
-        value as String,
-        valueColor as Graphics.ColorType
+        index as Number,
+        normalColor as Graphics.ColorType
     ) as Void {
         var totalHeight = mDrawLabelHeight + mDrawGap + mDrawValueHeight;
         var blockTop = centerY - (totalHeight / 2);
@@ -842,14 +1584,22 @@ class UltraTrailDashboardView extends WatchUi.DataField {
         dc.setColor(mDrawLabelColor, mDrawBackgroundColor);
         dc.drawText(
             centerX, blockTop + (mDrawLabelHeight / 2),
-            mDrawLabelFont, label,
+            mDrawLabelFont, mQuadLabel[index],
             Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER
         );
+
+        var valueColor = normalColor;
+        var level = mQuadLevel[index];
+        if (level == LEVEL_DANGER) {
+            valueColor = Graphics.COLOR_RED;
+        } else if (level == LEVEL_WARNING) {
+            valueColor = Graphics.COLOR_ORANGE;
+        }
 
         dc.setColor(valueColor, mDrawBackgroundColor);
         dc.drawText(
             centerX, blockTop + mDrawLabelHeight + mDrawGap + (mDrawValueHeight / 2),
-            mDrawValueFont, value,
+            mDrawValueFont, mQuadValue[index],
             Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER
         );
     }

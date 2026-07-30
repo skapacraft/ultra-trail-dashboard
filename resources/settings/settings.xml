@@ -2,16 +2,111 @@
 <!--
     SETTINGS.XML
     ============
-    Descrive COME viene mostrata all'utente la proprietà definita in
-    properties.xml, dentro il menu impostazioni dell'app dentro Garmin
-    Connect Mobile (Dispositivo -> Campi Dati/App -> Ultra-Trail Dashboard
-    -> Impostazioni) o nel pannello impostazioni del simulatore.
+    Descrive COME vengono mostrate all'utente le proprietà definite in
+    properties.xml, dentro il menu impostazioni dell'app in Garmin Connect
+    Mobile (Dispositivo -> Campi Dati/App -> Ultra-Trail Dashboard ->
+    Impostazioni) o nel pannello impostazioni del simulatore.
 
-    type="numeric" con min/max mostra un campo numerico con validazione:
-    l'utente non potrà inserire un valore fuori dal range 3-30 secondi.
+    I valori dei <listEntry> DEVONO combaciare con le costanti SRC_* in
+    source/UltraTrailDashboardView.mc. Vedi la nota in properties.xml sul
+    perché non vanno mai riordinati dopo una pubblicazione.
 -->
 <settings xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://developer.garmin.com/downloads/connect-iq/resources.xsd">
+
+    <!-- Layout dei 4 quadranti -->
+
+    <setting propertyKey="@Properties.Quadrant1" title="@Strings.Quadrant1Title">
+        <settingConfig type="list">
+            <listEntry value="0">@Strings.SourcePace</listEntry>
+            <listEntry value="1">@Strings.SourceHeartRate</listEntry>
+            <listEntry value="2">@Strings.SourceGrade</listEntry>
+            <listEntry value="3">@Strings.SourceGap</listEntry>
+            <listEntry value="4">@Strings.SourceReserve</listEntry>
+            <listEntry value="5">@Strings.SourceTtf</listEntry>
+            <listEntry value="6">@Strings.SourceSustain</listEntry>
+            <listEntry value="7">@Strings.SourceCarb</listEntry>
+            <listEntry value="8">@Strings.SourceQuads</listEntry>
+        </settingConfig>
+    </setting>
+
+    <setting propertyKey="@Properties.Quadrant2" title="@Strings.Quadrant2Title">
+        <settingConfig type="list">
+            <listEntry value="0">@Strings.SourcePace</listEntry>
+            <listEntry value="1">@Strings.SourceHeartRate</listEntry>
+            <listEntry value="2">@Strings.SourceGrade</listEntry>
+            <listEntry value="3">@Strings.SourceGap</listEntry>
+            <listEntry value="4">@Strings.SourceReserve</listEntry>
+            <listEntry value="5">@Strings.SourceTtf</listEntry>
+            <listEntry value="6">@Strings.SourceSustain</listEntry>
+            <listEntry value="7">@Strings.SourceCarb</listEntry>
+            <listEntry value="8">@Strings.SourceQuads</listEntry>
+        </settingConfig>
+    </setting>
+
+    <setting propertyKey="@Properties.Quadrant3" title="@Strings.Quadrant3Title">
+        <settingConfig type="list">
+            <listEntry value="0">@Strings.SourcePace</listEntry>
+            <listEntry value="1">@Strings.SourceHeartRate</listEntry>
+            <listEntry value="2">@Strings.SourceGrade</listEntry>
+            <listEntry value="3">@Strings.SourceGap</listEntry>
+            <listEntry value="4">@Strings.SourceReserve</listEntry>
+            <listEntry value="5">@Strings.SourceTtf</listEntry>
+            <listEntry value="6">@Strings.SourceSustain</listEntry>
+            <listEntry value="7">@Strings.SourceCarb</listEntry>
+            <listEntry value="8">@Strings.SourceQuads</listEntry>
+        </settingConfig>
+    </setting>
+
+    <setting propertyKey="@Properties.Quadrant4" title="@Strings.Quadrant4Title">
+        <settingConfig type="list">
+            <listEntry value="0">@Strings.SourcePace</listEntry>
+            <listEntry value="1">@Strings.SourceHeartRate</listEntry>
+            <listEntry value="2">@Strings.SourceGrade</listEntry>
+            <listEntry value="3">@Strings.SourceGap</listEntry>
+            <listEntry value="4">@Strings.SourceReserve</listEntry>
+            <listEntry value="5">@Strings.SourceTtf</listEntry>
+            <listEntry value="6">@Strings.SourceSustain</listEntry>
+            <listEntry value="7">@Strings.SourceCarb</listEntry>
+            <listEntry value="8">@Strings.SourceQuads</listEntry>
+        </settingConfig>
+    </setting>
+
+    <!-- Pendenza -->
+
+    <!--
+        type="numeric" con min/max mostra un campo numerico con validazione:
+        l'utente non potrà inserire un valore fuori dal range 3-30 secondi.
+    -->
     <setting propertyKey="@Properties.SmoothingWindowSeconds" title="@Strings.SmoothingWindowTitle">
         <settingConfig type="numeric" min="3" max="30" required="true"/>
     </setting>
+
+    <!-- Motore fisiologico -->
+
+    <setting propertyKey="@Properties.ThresholdPaceSeconds" title="@Strings.ThresholdPaceTitle" prompt="@Strings.ThresholdPacePrompt">
+        <settingConfig type="numeric" min="0" max="1200" required="true"/>
+    </setting>
+
+    <setting propertyKey="@Properties.DurabilityPercent" title="@Strings.DurabilityTitle" prompt="@Strings.DurabilityPrompt">
+        <settingConfig type="numeric" min="0" max="25" required="true"/>
+    </setting>
+
+    <setting propertyKey="@Properties.ResetCalibration" title="@Strings.ResetCalibrationTitle" prompt="@Strings.ResetCalibrationPrompt">
+        <settingConfig type="boolean"/>
+    </setting>
+
+    <!-- Carboidrati e discesa -->
+
+    <setting propertyKey="@Properties.BodyMassKg" title="@Strings.BodyMassTitle" prompt="@Strings.BodyMassPrompt">
+        <settingConfig type="numeric" min="35" max="150" required="true"/>
+    </setting>
+
+    <setting propertyKey="@Properties.CarbIntakeGramsPerHour" title="@Strings.CarbIntakeTitle" prompt="@Strings.CarbIntakePrompt">
+        <settingConfig type="numeric" min="0" max="120" required="true"/>
+    </setting>
+
+    <setting propertyKey="@Properties.DescentCapacityMeters" title="@Strings.DescentCapacityTitle" prompt="@Strings.DescentCapacityPrompt">
+        <settingConfig type="numeric" min="500" max="15000" required="true"/>
+    </setting>
+
 </settings>

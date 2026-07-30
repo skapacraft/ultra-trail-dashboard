@@ -17,7 +17,7 @@
     che è solo l'identificativo della scheda/listing, un namespace diverso.
     Il portale stesso rifiuta l'upload con un errore esplicito
     ("L'ID dell'app nel file manifest è diverso da quello registrato per
-    questa app") se questo valore non combacia con eb941ffa... — quindi
+    questa app") se questo valore non combacia con eb941ffa..., quindi
     NON cambiare mai questo id dopo la prima pubblicazione, se non
     indicato diversamente da un errore analogo del portale.
 -->

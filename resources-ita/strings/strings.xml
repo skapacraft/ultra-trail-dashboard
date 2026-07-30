@@ -4,15 +4,15 @@
     ==================================
     Sovrascrive SOLO le stringhe elencate qui sotto quando l'orologio è
     impostato in lingua italiana. Le stringhe non presenti in questo file
-    (es. AppName, GapFieldLabel) restano quelle definite nel file di
-    default in resources/strings/strings.xml (inglese) — non serve
+    (es. AppName e le etichette dei campi FIT) restano quelle definite nel
+    file di default in resources/strings/strings.xml (inglese): non serve
     duplicarle qui se non vanno tradotte.
 -->
 <resources>
     <string id="SmoothingWindowTitle">Finestra smoothing pendenza (sec)</string>
 
     <!--
-        VINCOLO - MASSIMO 6 CARATTERI per le 4 etichette dei quadranti.
+        VINCOLO - MASSIMO 6 CARATTERI per le etichette dei quadranti.
         Sono disegnate con FONT_XTINY (il font di sistema più piccolo, senza
         alcun ripiego più piccolo disponibile): oltre i 6 caratteri
         sconfinano nel quadrante accanto sugli schermi 240x240.
@@ -22,4 +22,54 @@
     <string id="LabelHeartRate">HR</string>
     <string id="LabelGrade">PEND</string>
     <string id="LabelGap">GAP</string>
+    <string id="LabelReserve">RISER</string>
+    <string id="LabelTtf">LIMITE</string>
+    <string id="LabelSustain">SOST</string>
+    <string id="LabelCarb">CARBO</string>
+    <string id="LabelQuads">QUADRI</string>
+
+    <!--
+        LabelAnaerobic non ha un quadrante dedicato: compare solo come
+        etichetta dinamica del campo LIMITE, quando è la riserva anaerobica
+        a essere il vincolo dominante.
+    -->
+    <string id="LabelAnaerobic">ANAER</string>
+
+    <!--
+        Nomi delle sorgenti nel menu di configurazione dei quadranti:
+        nessun vincolo di lunghezza, compaiono in Garmin Connect Mobile.
+    -->
+    <string id="SourcePace">Passo</string>
+    <string id="SourceHeartRate">Frequenza cardiaca</string>
+    <string id="SourceGrade">Pendenza</string>
+    <string id="SourceGap">GAP (passo corretto per pendenza)</string>
+    <string id="SourceReserve">Riserva anaerobica (%)</string>
+    <string id="SourceTtf">Tempo al limite (qualsiasi sistema)</string>
+    <string id="SourceSustain">Passo sostenibile</string>
+    <string id="SourceCarb">Carboidrati residui (%)</string>
+    <string id="SourceQuads">Capacità di discesa (%)</string>
+
+    <string id="Quadrant1Title">Campo in alto a sinistra</string>
+    <string id="Quadrant2Title">Campo in alto a destra</string>
+    <string id="Quadrant3Title">Campo in basso a sinistra</string>
+    <string id="Quadrant4Title">Campo in basso a destra</string>
+
+    <string id="ThresholdPaceTitle">Passo soglia (sec per km/mi)</string>
+    <string id="ThresholdPacePrompt">Punto di partenza opzionale, in secondi per chilometro o per miglio secondo le unità del dispositivo. Per esempio 300 significa 5:00 al km. Lascia 0 per far calcolare tutto al campo dati sulle tue uscite: appena ha dati sufficienti, questo valore viene ignorato.</string>
+
+    <string id="DurabilityTitle">Durabilità (% ogni 100 kJ/kg)</string>
+    <string id="DurabilityPrompt">Quanto passo sostenibile perdi mano a mano che lo sforzo si accumula. L'8% ogni 100 kJ/kg (circa 2 ore e mezza di corsa continua) va bene per la maggior parte dei corridori. Alzalo se crolli nel finale delle gare lunghe, abbassalo se tieni bene il ritmo. Metti 0 per mantenere la soglia costante.</string>
+
+    <string id="ResetCalibrationTitle">Azzera calibrazione</string>
+    <string id="ResetCalibrationPrompt">Cancella i record personali che il campo usa per stimare la tua velocità critica. Utile dopo un lungo stop, o se una sessione con GPS impazzito ha lasciato un record irraggiungibile. L'interruttore si rimette da solo su spento a operazione conclusa.</string>
+
+    <!-- Bilancio dei carboidrati e danno da discesa. -->
+    <string id="BodyMassTitle">Massa corporea (kg)</string>
+    <string id="BodyMassPrompt">Serve solo al bilancio dei carboidrati, che ragiona in grammi assoluti mentre il resto del modello lavora per chilogrammo. Il campo non legge il tuo profilo Garmin, così non richiede alcun permesso aggiuntivo e nulla lascia mai l'orologio.</string>
+
+    <string id="CarbIntakeTitle">Piano carboidrati (g all'ora)</string>
+    <string id="CarbIntakePrompt">Quanto prevedi di mangiare ogni ora. Il modello dà per scontato che tu segua davvero il piano: un campo dati non riceve gli eventi dei tasti, quindi non può sapere quando mangi per davvero. 60 g/h vanno bene con prodotti a solo glucosio; da 90 a 120 g/h servono miscele glucosio-fruttosio e un intestino allenato. Oltre i 120 l'intestino non assorbe e il resto ti resta sullo stomaco, quindi il campo taglia lì. Metti 0 per simulare una gara senza mangiare.</string>
+
+    <string id="DescentCapacityTitle">Capacità di discesa (m)</string>
+    <string id="DescentCapacityPrompt">Quanto dislivello negativo reggono i tuoi quadricipiti prima che la frenata diventi il limite. Lo sai di te meglio di qualunque formula: pensa alla gara in cui ti sono partite le gambe. 3000 m vanno bene per un trail runner allenato ma non specialista di discesa; 6000 m o più per uno specialista di montagna. Scendere veloce pesa più che scendere piano, quindi i metri qui sono pesati, non grezzi.</string>
 </resources>

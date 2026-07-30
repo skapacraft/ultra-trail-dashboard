@@ -7,12 +7,86 @@
     ricompilare l'app. Il sistema li salva sull'orologio e li ripristina
     automaticamente ad ogni avvio.
 
-    Qui definiamo un solo valore: la durata (in secondi) della finestra di
-    media mobile usata per stabilizzare la pendenza. Di default sono 10
-    secondi (vedi la spiegazione in UltraTrailDashboardView.mc), ma un
-    utente che corre su sentieri molto tecnici potrebbe preferire una
-    finestra più corta (pendenza più reattiva) o più lunga (più stabile).
+    ATTENZIONE: i valori numerici dei quadranti (0-6) sono un contratto con
+    le costanti SRC_* in source/UltraTrailDashboardView.mc e con i
+    <listEntry> in settings.xml. Vanno tenuti allineati, e soprattutto NON
+    vanno mai riordinati dopo una pubblicazione: la configurazione già
+    salvata sugli orologi degli utenti punterebbe al campo sbagliato.
 -->
 <properties xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://developer.garmin.com/downloads/connect-iq/resources.xsd">
+
+    <!--
+        Durata (in secondi) della finestra di media mobile usata per
+        stabilizzare la pendenza. Di default 10 secondi (vedi la
+        spiegazione in UltraTrailDashboardView.mc), ma chi corre su
+        sentieri molto tecnici potrebbe preferire una finestra più corta
+        (pendenza più reattiva) o più lunga (più stabile).
+    -->
     <property id="SmoothingWindowSeconds" type="number">10</property>
+
+    <!--
+        Sorgente di ciascuno dei 4 quadranti.
+          0 = passo    1 = frequenza cardiaca    2 = pendenza    3 = GAP
+          4 = riserva anaerobica    5 = tempo al cedimento
+          6 = passo sostenibile
+        I default riproducono esattamente il layout delle versioni
+        precedenti dell'app: chi aggiorna non si trova nulla di diverso
+        finché non decide lui di cambiare.
+    -->
+    <property id="Quadrant1" type="number">0</property>
+    <property id="Quadrant2" type="number">1</property>
+    <property id="Quadrant3" type="number">2</property>
+    <property id="Quadrant4" type="number">3</property>
+
+    <!--
+        Passo soglia, in secondi per unità di distanza del dispositivo
+        (secondi/km per chi usa il sistema metrico, secondi/miglio per chi
+        usa quello imperiale). Serve SOLO come punto di partenza finché
+        l'autocalibrazione non ha raccolto abbastanza dati: da quel momento
+        in poi viene ignorato in favore della stima sui dati reali.
+        0 = non impostato.
+    -->
+    <property id="ThresholdPaceSeconds" type="number">0</property>
+
+    <!--
+        Durabilità: percentuale di velocità sostenibile che l'atleta perde
+        ogni 100 kJ/kg di lavoro accumulato (circa 2 ore e mezza di corsa a
+        ritmo moderato). È il parametro che rende il modello utilizzabile
+        oltre le 3 ore, dove tutti i modelli a soglia costante sbagliano.
+        0 disattiva il decadimento.
+    -->
+    <property id="DurabilityPercent" type="number">8</property>
+
+    <!--
+        Interruttore per cancellare i record personali della calibrazione.
+        Si riarma da solo: l'app lo riporta a false subito dopo aver
+        eseguito l'azzeramento.
+    -->
+    <property id="ResetCalibration" type="boolean">false</property>
+
+    <!--
+        Massa corporea in kg. Serve al bilancio dei carboidrati, che ragiona
+        in grammi assoluti mentre tutto il resto del motore lavora per kg.
+        È un'impostazione e non una lettura dal profilo utente Garmin perché
+        quest'ultima richiederebbe il permesso "UserProfile", che l'app non
+        chiede: vedi il commento in configureModels().
+    -->
+    <property id="BodyMassKg" type="number">70</property>
+
+    <!--
+        Carboidrati che l'atleta prevede di assumere ogni ora, in grammi.
+        Il modello assume che il piano venga davvero seguito: sui Data Field
+        non arrivano eventi dei tasti, quindi non c'è modo di sapere quando
+        si mangia davvero.
+    -->
+    <property id="CarbIntakeGramsPerHour" type="number">60</property>
+
+    <!--
+        Quanto dislivello negativo l'atleta regge prima che la discesa
+        diventi un problema, in metri. È il parametro del modello di danno
+        eccentrico, il solo sistema che nel trail lungo cede prima di quello
+        aerobico e che nessun altro campo dati modella.
+    -->
+    <property id="DescentCapacityMeters" type="number">3000</property>
+
 </properties>

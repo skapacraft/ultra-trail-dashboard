@@ -4,7 +4,7 @@
     =====================================================
     Questo file è la base a cui il sistema ricorre quando la lingua del
     dispositivo non ha una cartella di traduzione dedicata (es. tedesco,
-    francese, ecc. — finché non aggiungiamo anche quelle). Per l'italiano
+    francese, ecc. finché non aggiungiamo anche quelle). Per l'italiano
     abbiamo invece una cartella separata, resources-ita/strings/strings.xml,
     che sovrascrive solo le stringhe elencate lì: Connect IQ sceglie
     automaticamente il set giusto in base alla lingua impostata
@@ -20,18 +20,20 @@
     <string id="AppName">Ultra-Trail Dashboard</string>
 
     <!--
-        GapFieldLabel: l'etichetta associata al campo FIT che scriviamo
-        nell'attività. È il nome che comparirà nel grafico su Garmin
-        Connect/Strava a fine allenamento.
+        Etichette dei campi personalizzati scritti nel file .FIT. Sono i
+        nomi che compariranno nei grafici su Garmin Connect e Strava a fine
+        allenamento. Restano in inglese in tutte le lingue: sono nomi di
+        colonne dentro un file di dati, e tradurli renderebbe i file di uno
+        stesso atleta incoerenti tra loro se cambiasse lingua all'orologio.
     -->
     <string id="GapFieldLabel">GAP Pace</string>
-
-    <!--
-        SmoothingWindowTitle: etichetta mostrata nel menu impostazioni di
-        Garmin Connect Mobile per il parametro SmoothingWindowSeconds
-        (vedi resources/properties/properties.xml e settings.xml).
-    -->
-    <string id="SmoothingWindowTitle">Grade smoothing window (sec)</string>
+    <string id="ReserveFieldLabel">Anaerobic Reserve</string>
+    <string id="SustainFieldLabel">Sustainable Pace</string>
+    <string id="WorkFieldLabel">Accumulated Work</string>
+    <string id="CsFieldLabel">Critical Speed</string>
+    <string id="DPrimeFieldLabel">D Prime</string>
+    <string id="CarbFieldLabel">Carbohydrate Remaining</string>
+    <string id="EccentricFieldLabel">Eccentric Load</string>
 
     <!--
         Etichette brevi mostrate sopra ogni valore nei 4 quadranti della UI,
@@ -51,4 +53,65 @@
     <string id="LabelHeartRate">HR</string>
     <string id="LabelGrade">GRADE</string>
     <string id="LabelGap">GAP</string>
+    <string id="LabelReserve">RSRV</string>
+    <string id="LabelTtf">LIMIT</string>
+    <string id="LabelSustain">SUST</string>
+    <string id="LabelCarb">CARBS</string>
+    <string id="LabelQuads">QUADS</string>
+
+    <!--
+        LabelAnaerobic non ha un quadrante dedicato: compare solo come
+        etichetta dinamica del campo LIMITE, quando è la riserva anaerobica
+        a essere il vincolo dominante. LabelCarb e LabelQuads fanno doppio
+        servizio, sia come etichetta di quadrante sia come nome del vincolo.
+    -->
+    <string id="LabelAnaerobic">ANAER</string>
+
+    <!--
+        Nomi delle sorgenti nel menu di configurazione dei quadranti. Questi
+        NON hanno il vincolo dei 6 caratteri: compaiono in Garmin Connect
+        Mobile, dove c'è tutto lo spazio necessario, quindi conviene essere
+        espliciti invece che criptici.
+    -->
+    <string id="SourcePace">Pace</string>
+    <string id="SourceHeartRate">Heart rate</string>
+    <string id="SourceGrade">Grade</string>
+    <string id="SourceGap">GAP (grade adjusted pace)</string>
+    <string id="SourceReserve">Anaerobic reserve (%)</string>
+    <string id="SourceTtf">Time to limit (any system)</string>
+    <string id="SourceSustain">Sustainable pace</string>
+    <string id="SourceCarb">Carbohydrate left (%)</string>
+    <string id="SourceQuads">Descending capacity (%)</string>
+
+    <string id="Quadrant1Title">Top left field</string>
+    <string id="Quadrant2Title">Top right field</string>
+    <string id="Quadrant3Title">Bottom left field</string>
+    <string id="Quadrant4Title">Bottom right field</string>
+
+    <!--
+        SmoothingWindowTitle: etichetta mostrata nel menu impostazioni di
+        Garmin Connect Mobile per il parametro SmoothingWindowSeconds
+        (vedi resources/properties/properties.xml e settings.xml).
+    -->
+    <string id="SmoothingWindowTitle">Grade smoothing window (sec)</string>
+
+    <!-- Impostazioni del motore fisiologico. -->
+    <string id="ThresholdPaceTitle">Threshold pace (sec per km/mi)</string>
+    <string id="ThresholdPacePrompt">Optional starting point, in seconds per kilometre or mile depending on your device units. For example 300 means 5:00 per km. Leave 0 to let the field work it out from your own runs: once it has enough data, this value is ignored.</string>
+
+    <string id="DurabilityTitle">Durability (% per 100 kJ/kg)</string>
+    <string id="DurabilityPrompt">How much sustainable pace you lose as the effort accumulates. 8% per 100 kJ/kg (roughly 2.5 hours of steady running) suits most runners. Raise it if you fade badly late in long races, lower it if you hold your pace well. Set 0 to keep the threshold constant.</string>
+
+    <string id="ResetCalibrationTitle">Reset calibration</string>
+    <string id="ResetCalibrationPrompt">Clears the personal bests the field uses to estimate your critical speed. Use it after a long layoff, or if one bad GPS session left a record you cannot reach. The switch turns itself back off once done.</string>
+
+    <!-- Carbohydrate balance and descent damage. -->
+    <string id="BodyMassTitle">Body mass (kg)</string>
+    <string id="BodyMassPrompt">Used only by the carbohydrate balance, which works in absolute grams while the rest of the model works per kilogram. The field does not read your Garmin profile, so that it needs no extra permission and nothing ever leaves the watch.</string>
+
+    <string id="CarbIntakeTitle">Carbohydrate plan (g per hour)</string>
+    <string id="CarbIntakePrompt">What you plan to eat per hour. The model assumes you actually follow it: a data field receives no button events, so it cannot know when you really eat. 60 g/h suits glucose-only products; 90 to 120 g/h needs a glucose and fructose mix and a trained gut. Above 120 the gut cannot absorb it and the surplus just sits in your stomach, so the field caps it there. Set 0 to model going without food.</string>
+
+    <string id="DescentCapacityTitle">Descent capacity (m)</string>
+    <string id="DescentCapacityPrompt">How much vertical descent your quads take before braking becomes the limit. You know this about yourself better than any formula does: think of the race where your legs went. 3000 m suits a trained runner who is not a descending specialist; 6000 m or more suits a mountain specialist. Fast descending counts for more than slow, so the metres here are weighted, not raw.</string>
 </resources>
