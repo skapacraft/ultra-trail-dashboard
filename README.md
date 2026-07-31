@@ -179,6 +179,11 @@ No data is collected, stored, or transmitted anywhere. All calculations run
 entirely on-device, including the calibration, whose personal bests never
 leave the watch. Full [privacy policy](https://skapacraft.com/tools/apps/ultra-trail-dashboard/privacy/).
 
+## License
+
+GPLv3. See [LICENSE](LICENSE) for the full text. The Connect IQ Store binary
+is built from this same source, unmodified.
+
 ## Author
 
 Built by [SkapaCraft](https://skapacraft.com) and [LivQTech](https://livq.it).
