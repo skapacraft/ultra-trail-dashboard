@@ -17,34 +17,33 @@
 
 // SpeedCalibration.mc
 //
-// Stima automatica di velocità critica (CS) e capacità anaerobica (D')
-// dai dati dell'atleta, senza che l'utente debba inserire nulla.
+// Estimates critical speed (CS) and anaerobic capacity (D') from the athlete's
+// own running, with nothing for the user to enter.
 //
-// PERCHÉ ESISTE QUESTA CLASSE
-// Ogni modello di questo tipo (Xert, Stryd, WKO) ha bisogno di due
-// parametri dell'atleta per funzionare. Chiederli all'utente è il modo
-// più rapido per perdere l'utente: chi non li conosce si ferma
-// all'installazione, e chi li conosce spesso inserisce il valore di due
-// stagioni fa. Un campo dati che funziona al primo utilizzo e migliora da
-// solo vale molto di più di uno che pretende una configurazione corretta.
+// WHY THIS CLASS EXISTS
+// Every model of this kind (Xert, Stryd, WKO) needs two athlete parameters to
+// work at all. Asking the user for them is the fastest way to lose the user:
+// those who do not know them stop at installation, and those who do often type
+// in a value from two seasons ago. A data field that works on first use and
+// improves by itself is worth far more than one that demands correct
+// configuration.
 //
-// COME FUNZIONA
-// Il modello iperbolico della prestazione dice che la distanza percorribile
-// in un tempo t vale:
+// HOW IT WORKS
+// The hyperbolic performance model says the distance coverable in a time t is:
 //
 //     d(t) = CS * t + D'
 //
-// È una retta: bastano due punti per determinarne pendenza (CS) e
-// intercetta (D'). Prendiamo quindi il MIGLIOR risultato dell'atleta su due
-// durate (3 e 12 minuti), misurato in distanza equivalente in piano.
+// That is a straight line, so two points fix its slope (CS) and intercept (D').
+// What is taken, then, is the athlete's BEST result over two durations (3 and
+// 12 minutes), measured in flat-equivalent distance.
 //
-// COME STA IN MEMORIA
-// Servirebbe la media mobile massima su finestre di 3 e 12 minuti, cioè in
-// teoria 720 campioni al secondo da tenere in RAM. Invece teniamo la
-// distanza CUMULATA campionata ogni 5 secondi in un buffer circolare di 145
-// celle: la distanza percorsa in una finestra è la differenza tra due celle,
-// quindi ogni aggiornamento costa due sottrazioni e due confronti, e la RAM
-// occupata è circa un ventesimo.
+// HOW IT FITS IN MEMORY
+// The obvious approach needs the maximum rolling average over 3 and 12 minute
+// windows, so in principle 720 one-second samples held in RAM. Instead the
+// CUMULATIVE distance is sampled every 5 seconds into a 145-cell ring buffer:
+// the distance covered in a window is the difference between two cells, so each
+// update costs two subtractions and two comparisons, and the RAM used is about
+// one twentieth.
 
 import Toybox.Lang;
 import Toybox.Application.Storage;
@@ -52,59 +51,58 @@ import Toybox.Application.Storage;
 class SpeedCalibration {
 
     // ------------------------------------------------------------------
-    // GEOMETRIA DEL BUFFER
+    // BUFFER GEOMETRY
     // ------------------------------------------------------------------
 
-    // Ogni quanti secondi salviamo un campione di distanza cumulata.
-    // 5 secondi sono un compromesso: abbastanza fitti da individuare i
-    // bordi di una finestra di 3 minuti con un errore sotto il 3%,
-    // abbastanza radi da entrare in poco più di 1KB di RAM.
+    // How often a cumulative-distance sample is stored. 5 seconds is the
+    // compromise: dense enough to locate the edges of a 3-minute window to
+    // within 3%, sparse enough to fit in a little over 1KB of RAM.
     const SAMPLE_PERIOD_SEC as Float = 5.0;
 
-    // Le due durate su cui misuriamo il massimo, in numero di campioni.
-    // 36 campioni = 180 s = 3 minuti; 144 campioni = 720 s = 12 minuti.
+    // The two durations the maximum is measured over, in samples.
+    // 36 samples = 180 s = 3 minutes; 144 samples = 720 s = 12 minutes.
     const SHORT_SLOTS as Number = 36;
     const LONG_SLOTS as Number = 144;
 
-    // Le stesse due durate in secondi, usate nella regressione.
+    // The same two durations in seconds, used in the regression.
     const SHORT_SEC as Float = 180.0;
     const LONG_SEC as Float = 720.0;
 
-    // Il buffer deve contenere la finestra lunga PIÙ il campione corrente.
+    // The buffer has to hold the long window PLUS the current sample.
     const BUFFER_SIZE as Number = 145;
 
-    // Chiavi di persistenza. I record restano sull'orologio tra un'attività
-    // e l'altra: è ciò che permette al modello di essere già pronto alla
-    // seconda o terza uscita.
+    // Persistence keys. The personal bests stay on the watch between
+    // activities, which is what lets the model be ready by the second or third
+    // run.
     const KEY_BEST_SHORT as String = "calBestShort";
     const KEY_BEST_LONG as String = "calBestLong";
 
     // ------------------------------------------------------------------
-    // STATO
+    // STATE
     // ------------------------------------------------------------------
 
-    // Buffer circolare della distanza equivalente in piano cumulata (m).
+    // Ring buffer of cumulative flat-equivalent distance (m).
     private var mCumulative as Array<Float>;
     private var mIndex as Number;
     private var mCount as Number;
 
-    // Distanza equivalente in piano accumulata da inizio attività (m).
+    // Flat-equivalent distance accumulated since the activity started (m).
     private var mDistance as Float;
 
-    // Secondi trascorsi dall'ultimo campione salvato nel buffer.
+    // Seconds elapsed since the last sample was written to the buffer.
     private var mSinceSample as Float;
 
-    // Record personali: massima distanza equivalente in piano coperta in
-    // una finestra di 3 e di 12 minuti. Sopravvivono all'attività.
+    // Personal bests: the greatest flat-equivalent distance covered in a
+    // 3-minute and a 12-minute window. These outlive the activity.
     private var mBestShort as Float;
     private var mBestLong as Float;
 
-    // true se i record sono cambiati e vanno riscritti su Storage: evita
-    // scritture inutili in memoria flash a ogni stop del timer.
+    // True when the bests have changed and need writing back to Storage. It
+    // avoids pointless flash writes at every timer stop.
     private var mDirty as Boolean;
 
     // ------------------------------------------------------------------
-    // COSTRUTTORE
+    // CONSTRUCTOR
     // ------------------------------------------------------------------
 
     function initialize() {
@@ -124,11 +122,10 @@ class SpeedCalibration {
     }
 
     // ------------------------------------------------------------------
-    // Carica i record personali dalla memoria persistente. Qualunque
-    // problema (chiave assente alla prima installazione, valore di tipo
-    // inatteso perché scritto da una versione precedente) si risolve
-    // ripartendo da zero: la calibrazione si ricostruisce da sola in
-    // qualche uscita, mentre un crash all'avvio è definitivo.
+    // Loads the personal bests from persistent storage. Any problem at all (no
+    // key on first installation, an unexpected type written by an earlier
+    // version) is handled by starting from zero: the calibration rebuilds
+    // itself over a few runs, whereas a crash at startup is permanent.
     // ------------------------------------------------------------------
     private function load() as Void {
         try {
@@ -147,9 +144,9 @@ class SpeedCalibration {
     }
 
     // ------------------------------------------------------------------
-    // Salva i record, se cambiati. Chiamata allo stop del timer e alla
-    // chiusura dell'app, mai durante la corsa: scrivere in flash ogni
-    // secondo accorcerebbe la vita del dispositivo senza alcun beneficio.
+    // Saves the bests, when they have changed. Called at timer stop and at app
+    // close, never while running: writing to flash every second would shorten
+    // the life of the device for no benefit at all.
     // ------------------------------------------------------------------
     function save() as Void {
         if (!mDirty) {
@@ -160,17 +157,17 @@ class SpeedCalibration {
             Storage.setValue(KEY_BEST_LONG, mBestLong);
             mDirty = false;
         } catch (ex) {
-            // Storage pieno o non disponibile: i record restano validi in
-            // RAM per questa attività, si perdono alla successiva. Non è
-            // un motivo per interrompere l'attività dell'utente.
+            // Storage full or unavailable: the bests stay valid in RAM for
+            // this activity and are lost at the next one. That is not a reason
+            // to interrupt somebody's run.
         }
     }
 
     // ------------------------------------------------------------------
-    // Cancella i record personali, in RAM e su Storage. Esposto all'utente
-    // come impostazione: serve dopo un lungo stop, un cambio di categoria
-    // di terreno, o se una sessione anomala (dato GPS impazzito) ha
-    // lasciato un record irraggiungibile che blocca la stima troppo in alto.
+    // Clears the personal bests, in RAM and in Storage. Exposed to the user as
+    // a setting: it is needed after a long layoff, after a change of terrain
+    // category, or when one bad session (a GPS track gone wrong) left an
+    // unreachable best that pins the estimate too high.
     // ------------------------------------------------------------------
     function clear() as Void {
         mBestShort = 0.0;
@@ -180,15 +177,15 @@ class SpeedCalibration {
             Storage.deleteValue(KEY_BEST_SHORT);
             Storage.deleteValue(KEY_BEST_LONG);
         } catch (ex) {
-            // Niente da fare: i valori in RAM sono comunque azzerati.
+            // Nothing to do: the values in RAM are cleared regardless.
         }
     }
 
     // ------------------------------------------------------------------
-    // Azzera lo stato della SESSIONE (buffer e distanza cumulata) senza
-    // toccare i record personali. Da chiamare al reset dell'attività:
-    // la distanza riparte da zero, e confrontare campioni della corsa
-    // precedente con quelli della nuova produrrebbe finestre negative.
+    // Clears the SESSION state (buffer and cumulative distance) without
+    // touching the personal bests. Called when the activity is reset: distance
+    // restarts from zero, and comparing samples from the previous run against
+    // the new one would produce negative windows.
     // ------------------------------------------------------------------
     function resetSession() as Void {
         mIndex = 0;
@@ -198,15 +195,14 @@ class SpeedCalibration {
     }
 
     // ------------------------------------------------------------------
-    // Passo di aggiornamento, una volta al secondo.
+    // Update step, once a second.
     //
-    //   gapSpeed  velocità equivalente in piano (m/s), calcolata con
-    //             MinettiCost.modelRatio(): il tetto in salita è
-    //             indispensabile qui, perché senza di esso una rampa
-    //             ripida percorsa camminando produrrebbe un record di
-    //             3 minuti irrealisticamente alto e la CS stimata
-    //             resterebbe gonfiata per sempre
-    //   dt        secondi realmente trascorsi
+    //   gapSpeed  flat-equivalent speed (m/s), computed through
+    //             MinettiCost.modelRatio(). The uphill ceiling is essential
+    //             here: without it a steep ramp covered on foot would produce
+    //             an unrealistically high 3-minute best, and the estimated CS
+    //             would stay inflated forever
+    //   dt        seconds actually elapsed
     // ------------------------------------------------------------------
     function update(gapSpeed as Float, dt as Float) as Void {
         if (dt <= 0.0) {
@@ -216,9 +212,8 @@ class SpeedCalibration {
         mDistance += gapSpeed * dt;
         mSinceSample += dt;
 
-        // Un solo campione per chiamata: la View limita dt a un massimo di
-        // 5 secondi, quindi mSinceSample non può mai raggiungere il doppio
-        // del periodo di campionamento in un colpo solo.
+        // One sample per call: the View caps dt at 5 seconds, so mSinceSample
+        // can never reach twice the sampling period in one go.
         if (mSinceSample >= SAMPLE_PERIOD_SEC) {
             mSinceSample -= SAMPLE_PERIOD_SEC;
             pushSample();
@@ -226,8 +221,8 @@ class SpeedCalibration {
     }
 
     // ------------------------------------------------------------------
-    // Inserisce la distanza cumulata corrente nel buffer circolare e
-    // aggiorna i due record, se superati.
+    // Writes the current cumulative distance into the ring buffer and updates
+    // the two bests when they are beaten.
     // ------------------------------------------------------------------
     private function pushSample() as Void {
         mCumulative[mIndex] = mDistance;
@@ -236,8 +231,8 @@ class SpeedCalibration {
             mCount++;
         }
 
-        // Distanza coperta nella finestra di 3 minuti: differenza tra il
-        // campione appena scritto e quello di 36 posizioni prima.
+        // Distance covered in the 3-minute window: the difference between the
+        // sample just written and the one 36 slots earlier.
         if (mCount > SHORT_SLOTS) {
             var oldShort = (mIndex - 1 - SHORT_SLOTS + BUFFER_SIZE) % BUFFER_SIZE;
             var covered = mDistance - mCumulative[oldShort];
@@ -247,7 +242,7 @@ class SpeedCalibration {
             }
         }
 
-        // Stessa cosa sulla finestra di 12 minuti.
+        // The same over the 12-minute window.
         if (mCount > LONG_SLOTS) {
             var oldLong = (mIndex - 1 - LONG_SLOTS + BUFFER_SIZE) % BUFFER_SIZE;
             var covered = mDistance - mCumulative[oldLong];
@@ -259,13 +254,12 @@ class SpeedCalibration {
     }
 
     // ------------------------------------------------------------------
-    // true se i due record consentono una stima sensata.
+    // True when the two bests support a sensible estimate.
     //
-    // La condizione mBestLong > mBestShort non è una formalità: se il
-    // record lungo non supera quello corto significa che l'atleta non ha
-    // mai sostenuto uno sforzo per 12 minuti (o che i due record vengono
-    // da sessioni incoerenti). In quel caso la retta avrebbe pendenza
-    // negativa e produrrebbe una CS senza senso.
+    // The mBestLong > mBestShort condition is not a formality: if the long best
+    // does not exceed the short one, the athlete has never held an effort for
+    // 12 minutes, or the two bests come from inconsistent sessions. Either way
+    // the line would have a negative slope and produce a meaningless CS.
     // ------------------------------------------------------------------
     function isValid() as Boolean {
         if (mBestShort <= 0.0 || mBestLong <= 0.0) {
@@ -279,15 +273,15 @@ class SpeedCalibration {
     }
 
     // ------------------------------------------------------------------
-    // Pendenza della retta d(t) = CS*t + D', cioè la velocità critica in
-    // m/s. Chiamare solo dopo isValid().
+    // Slope of the line d(t) = CS*t + D', that is, critical speed in m/s. Call
+    // only after isValid().
     // ------------------------------------------------------------------
     function getCriticalSpeed() as Float {
         return (mBestLong - mBestShort) / (LONG_SEC - SHORT_SEC);
     }
 
     // ------------------------------------------------------------------
-    // Intercetta della stessa retta, cioè D' in metri.
+    // Intercept of the same line, that is, D' in metres.
     // ------------------------------------------------------------------
     function getDPrime() as Float {
         var d = mBestShort - (getCriticalSpeed() * SHORT_SEC);

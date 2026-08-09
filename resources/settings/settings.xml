@@ -2,18 +2,18 @@
 <!--
     SETTINGS.XML
     ============
-    Descrive COME vengono mostrate all'utente le proprietà definite in
-    properties.xml, dentro il menu impostazioni dell'app in Garmin Connect
-    Mobile (Dispositivo -> Campi Dati/App -> Ultra-Trail Dashboard ->
-    Impostazioni) o nel pannello impostazioni del simulatore.
+    Describes HOW the properties defined in properties.xml are presented to the
+    user, inside the app's settings menu in Garmin Connect Mobile (Device ->
+    Data Fields/Apps -> Ultra-Trail Dashboard -> Settings), or in the
+    simulator's settings panel.
 
-    I valori dei <listEntry> DEVONO combaciare con le costanti SRC_* in
-    source/UltraTrailDashboardView.mc. Vedi la nota in properties.xml sul
-    perché non vanno mai riordinati dopo una pubblicazione.
+    The <listEntry> values MUST match the SRC_* constants in
+    source/UltraTrailDashboardView.mc. See the note in properties.xml on why
+    they must never be reordered after a release.
 -->
 <settings xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://developer.garmin.com/downloads/connect-iq/resources.xsd">
 
-    <!-- Layout dei 4 quadranti -->
+    <!-- Layout of the 4 quadrants -->
 
     <setting propertyKey="@Properties.Quadrant1" title="@Strings.Quadrant1Title">
         <settingConfig type="list">
@@ -71,17 +71,17 @@
         </settingConfig>
     </setting>
 
-    <!-- Pendenza -->
+    <!-- Grade -->
 
     <!--
-        type="numeric" con min/max mostra un campo numerico con validazione:
-        l'utente non potrà inserire un valore fuori dal range 3-30 secondi.
+        type="numeric" with min and max renders a validated numeric field: the
+        user cannot enter a value outside the 3 to 30 second range.
     -->
     <setting propertyKey="@Properties.SmoothingWindowSeconds" title="@Strings.SmoothingWindowTitle">
         <settingConfig type="numeric" min="3" max="30" required="true"/>
     </setting>
 
-    <!-- Motore fisiologico -->
+    <!-- Physiological engine -->
 
     <setting propertyKey="@Properties.ThresholdPaceSeconds" title="@Strings.ThresholdPaceTitle" prompt="@Strings.ThresholdPacePrompt">
         <settingConfig type="numeric" min="0" max="1200" required="true"/>
@@ -95,7 +95,7 @@
         <settingConfig type="boolean"/>
     </setting>
 
-    <!-- Carboidrati e discesa -->
+    <!-- Carbohydrate and descent -->
 
     <setting propertyKey="@Properties.BodyMassKg" title="@Strings.BodyMassTitle" prompt="@Strings.BodyMassPrompt">
         <settingConfig type="numeric" min="35" max="150" required="true"/>

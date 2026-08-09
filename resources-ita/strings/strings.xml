@@ -1,22 +1,23 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-    STRINGS.XML (traduzione ITALIANA)
+    STRINGS.XML (ITALIAN translation)
     ==================================
-    Sovrascrive SOLO le stringhe elencate qui sotto quando l'orologio è
-    impostato in lingua italiana. Le stringhe non presenti in questo file
-    (es. AppName e le etichette dei campi FIT) restano quelle definite nel
-    file di default in resources/strings/strings.xml (inglese): non serve
-    duplicarle qui se non vanno tradotte.
+    Overrides ONLY the strings listed below, when the watch language is Italian.
+    Strings absent from this file, such as AppName and the FIT field labels,
+    stay as defined in the English default at resources/strings/strings.xml.
+    There is no need to duplicate a string here when it is not translated; the
+    ids deliberately left to the default are listed in
+    .github/untranslated.txt, which CI checks against this file.
 -->
 <resources>
     <string id="SmoothingWindowTitle">Finestra smoothing pendenza (sec)</string>
 
     <!--
-        VINCOLO - MASSIMO 6 CARATTERI per le etichette dei quadranti.
-        Sono disegnate con FONT_XTINY (il font di sistema più piccolo, senza
-        alcun ripiego più piccolo disponibile): oltre i 6 caratteri
-        sconfinano nel quadrante accanto sugli schermi 240x240.
-        Vedi il commento esteso in resources/strings/strings.xml.
+        CONSTRAINT: SIX CHARACTERS MAXIMUM for the quadrant labels. They are
+        drawn in FONT_XTINY, the smallest system font, with no smaller fallback
+        available; past six characters they spill into the neighbouring quadrant
+        on 240x240 screens. See the longer comment in
+        resources/strings/strings.xml.
     -->
     <string id="LabelPace">PASSO</string>
     <string id="LabelHeartRate">HR</string>
@@ -29,15 +30,15 @@
     <string id="LabelQuads">QUADRI</string>
 
     <!--
-        LabelAnaerobic non ha un quadrante dedicato: compare solo come
-        etichetta dinamica del campo LIMITE, quando è la riserva anaerobica
-        a essere il vincolo dominante.
+        LabelAnaerobic has no quadrant of its own: it appears only as the
+        dynamic label of the LIMIT field, when the anaerobic reserve is the
+        binding constraint.
     -->
     <string id="LabelAnaerobic">ANAER</string>
 
     <!--
-        Nomi delle sorgenti nel menu di configurazione dei quadranti:
-        nessun vincolo di lunghezza, compaiono in Garmin Connect Mobile.
+        Names of the sources in the quadrant configuration menu: no length
+        constraint, they appear in Garmin Connect Mobile.
     -->
     <string id="SourcePace">Passo</string>
     <string id="SourceHeartRate">Frequenza cardiaca</string>
@@ -63,7 +64,7 @@
     <string id="ResetCalibrationTitle">Azzera calibrazione</string>
     <string id="ResetCalibrationPrompt">Cancella i record personali che il campo usa per stimare la tua velocità critica. Utile dopo un lungo stop, o se una sessione con GPS impazzito ha lasciato un record irraggiungibile. L'interruttore si rimette da solo su spento a operazione conclusa.</string>
 
-    <!-- Bilancio dei carboidrati e danno da discesa. -->
+    <!-- Carbohydrate balance and descent damage. -->
     <string id="BodyMassTitle">Massa corporea (kg)</string>
     <string id="BodyMassPrompt">Serve solo al bilancio dei carboidrati, che ragiona in grammi assoluti mentre il resto del modello lavora per chilogrammo. Il campo non legge il tuo profilo Garmin, così non richiede alcun permesso aggiuntivo e nulla lascia mai l'orologio.</string>
 

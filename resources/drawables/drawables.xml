@@ -2,17 +2,16 @@
 <!--
     DRAWABLES.XML
     =============
-    Registra l'icona di lancio dell'app. Anche se un Campo Dati non ha
-    un'icona visibile come le app standalone, il compilatore Connect IQ
-    la richiede comunque per validare il manifest.
+    Registers the app's launcher icon. A data field has no visible icon the way
+    a standalone app does, but the Connect IQ compiler requires one anyway to
+    validate the manifest.
 
-    launcher_icon.svg è un'icona vettoriale minimale (una montagna stilizzata
-    su sfondo blu) generata come segnaposto: puoi sostituirla in qualsiasi
-    momento con un tuo disegno (stesso nome file, stessa cartella) senza
-    toccare questo XML o il manifest. Usare un SVG invece di un PNG a
-    dimensione fissa evita i warning di ridimensionamento: il compilatore
-    genera automaticamente la versione della dimensione giusta per ogni
-    dispositivo target (40x40 su Fenix 7, 65x65 su FR965, ecc.).
+    launcher_icon.svg is a minimal vector icon, a stylised mountain on a blue
+    background, produced as a placeholder. It can be replaced at any point with
+    a different drawing, same filename and same folder, without touching this
+    XML or the manifest. Using an SVG rather than a fixed-size PNG avoids the
+    rescaling warnings: the compiler generates the right size for each target
+    device automatically (40x40 on Fenix 7, 65x65 on FR965, and so on).
 -->
 <resources>
     <bitmap id="LauncherIcon" filename="launcher_icon.svg"/>

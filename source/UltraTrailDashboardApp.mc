@@ -17,44 +17,43 @@
 
 // UltraTrailDashboardApp.mc
 //
-// Questa è la classe "Application": il punto di ingresso di tutta l'app.
-// Il suo unico compito, per un Campo Dati (Data Field), è creare e
-// restituire l'istanza della View che disegnerà l'interfaccia grafica
-// (UltraTrailDashboardView, definita in UltraTrailDashboardView.mc).
+// The Application class: the entry point of the whole app. For a data field
+// its only job is to create and hand back the View that draws the interface
+// (UltraTrailDashboardView, in UltraTrailDashboardView.mc).
 //
-// Non contiene logica di calcolo: tutta la logica "pesante" vive nella View,
-// perché è la View a ricevere gli eventi compute()/onUpdate() dal sistema.
+// It holds no computation. All the heavy logic lives in the View, because the
+// View is what receives compute() and onUpdate() from the system.
 
-import Toybox.Application; // Modulo base per creare un'applicazione Connect IQ
-import Toybox.WatchUi;     // Modulo per la gestione delle View (interfacce grafiche)
-import Toybox.Lang;        // Modulo con i tipi di base (Dictionary, Array, ecc.)
+import Toybox.Application; // Base module for a Connect IQ application
+import Toybox.WatchUi;     // View handling
+import Toybox.Lang;        // Base types (Dictionary, Array, and so on)
 
-// La classe deve chiamarsi esattamente come indicato nell'attributo
-// entry="UltraTrailDashboardApp" del manifest.xml.
+// The class name has to match the entry="UltraTrailDashboardApp" attribute in
+// manifest.xml exactly.
 class UltraTrailDashboardApp extends Application.AppBase {
 
-    // Riferimento alla View creata in getInitialView(). Serve per poterle
-    // inoltrare l'evento di cambio impostazioni (vedi onSettingsChanged()).
-    // È nullable perché esiste solo dopo che il sistema ha richiesto la View.
+    // The View created in getInitialView(), kept so the settings-changed event
+    // can be forwarded to it (see onSettingsChanged()). Nullable, because it
+    // does not exist until the system has asked for the View.
     private var mView as UltraTrailDashboardView?;
 
-    // Costruttore: viene chiamato una sola volta all'avvio dell'app.
+    // Constructor: called once, when the app starts.
     function initialize() {
-        AppBase.initialize(); // Richiama sempre il costruttore della classe base
+        AppBase.initialize(); // Always call the base class constructor
         mView = null;
     }
 
-    // onStart(): chiamato quando l'app diventa attiva (es. inizio allenamento).
-    // Qui non serve fare nulla di speciale.
+    // onStart(): called when the app becomes active, for example when an
+    // activity starts. Nothing to do here.
     function onStart(state as Dictionary?) as Void {
     }
 
-    // onStop(): chiamato quando l'app viene chiusa (es. fine allenamento).
-    // Il file FIT lo salva già il sistema per conto suo, ma i record
-    // personali usati dall'autocalibrazione vivono nello Storage dell'app
-    // e li dobbiamo scrivere noi. La View lo fa già allo stop del timer:
-    // questa è la rete di sicurezza per i casi in cui quel callback non
-    // arriva (attività chiusa da menu, app terminata dal sistema).
+    // onStop(): called when the app closes, for example at the end of an
+    // activity. The system saves the FIT file itself, but the personal bests
+    // the self-calibration uses live in the app's Storage and are ours to
+    // write. The View already does it when the timer stops; this is the safety
+    // net for the cases where that callback never arrives (activity closed from
+    // a menu, app terminated by the system).
     function onStop(state as Dictionary?) as Void {
         var view = mView;
         if (view != null) {
@@ -62,25 +61,24 @@ class UltraTrailDashboardApp extends Application.AppBase {
         }
     }
 
-    // getInitialView(): il sistema chiama questa funzione per sapere quale
-    // View (interfaccia) mostrare. Per i Campi Dati bisogna restituire un
-    // array con una singola istanza della classe View del campo dati.
-    // Ne conserviamo anche il riferimento, per poterle inoltrare gli eventi
-    // che il sistema consegna all'Application e non alla View.
+    // getInitialView(): the system calls this to find out which View to show.
+    // A data field returns an array holding one instance of its View class. We
+    // keep the reference as well, so the events the system delivers to the
+    // Application rather than to the View can be forwarded.
     function getInitialView() as [Views] or [Views, InputDelegates] {
         var view = new UltraTrailDashboardView();
         mView = view;
         return [ view ];
     }
 
-    // onSettingsChanged(): il sistema lo chiama quando l'utente modifica le
-    // impostazioni da Garmin Connect Mobile mentre l'app è in esecuzione.
+    // onSettingsChanged(): called when the user changes a setting in Garmin
+    // Connect Mobile while the app is running.
     //
-    // IMPORTANTE: questo callback appartiene ad Application.AppBase e NON a
-    // WatchUi.DataField. Definirlo dentro la View (come si potrebbe pensare,
-    // visto che è lì che serve il dato) non produce alcun effetto: il sistema
-    // non lo invocherebbe mai. Va quindi intercettato qui e inoltrato alla
-    // View, che ricarica la finestra di smoothing e azzera lo storico.
+    // IMPORTANT: this callback belongs to Application.AppBase, NOT to
+    // WatchUi.DataField. Defining it inside the View, which is the obvious
+    // place since that is where the value is needed, does nothing at all: the
+    // system would never call it. So it is caught here and forwarded to the
+    // View, which reloads the smoothing window and clears its history.
     function onSettingsChanged() as Void {
         var view = mView;
         if (view != null) {

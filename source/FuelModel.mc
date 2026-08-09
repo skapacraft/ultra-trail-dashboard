@@ -17,83 +17,81 @@
 
 // FuelModel.mc
 //
-// Bilancio dei carboidrati in tempo reale.
+// Real-time carbohydrate balance.
 //
-// COSA FA DI DIVERSO DAI TIMER DI NUTRIZIONE ESISTENTI
-// I campi dati di nutrizione oggi sul Connect IQ Store sono quasi tutti
-// sveglie: vibrano ogni 30 minuti. Non sanno quanto stai consumando, non
-// sanno a che intensità stai andando, e dicono la stessa cosa a chi cammina
-// e a chi sta spingendo in salita. Questo modello fa il conto vero:
+// WHAT IT DOES THAT THE EXISTING NUTRITION TIMERS DO NOT
+// The nutrition data fields on the Connect IQ Store today are almost all
+// alarm clocks: they buzz every 30 minutes. They do not know how much you are
+// burning, they do not know what intensity you are running at, and they say the
+// same thing to somebody hiking as to somebody pushing up a climb. This model
+// does the actual arithmetic:
 //
-//   riserva iniziale + assorbito - ossidato = quanto ti resta
+//   starting store + absorbed - oxidised = what is left
 //
-// e da lì ricava quanto manca all'esaurimento al ritmo attuale.
+// and from there works out how long until it runs out at the current rate.
 //
-// LE TRE PARTI DEL CONTO
+// THE THREE PARTS OF THE SUM
 //
-// 1. OSSIDAZIONE. La frazione di energia che arriva dai carboidrati non è
-//    costante: a bassa intensità il corpo usa soprattutto grassi, vicino
-//    alla soglia usa soprattutto zuccheri. La curva è ricavata dalla
-//    intensità relativa alla velocità sostenibile, cioè dallo stesso
-//    modello che alimenta gli altri campi.
+// 1. OXIDATION. The fraction of energy coming from carbohydrate is not
+//    constant: at low intensity the body burns mostly fat, near threshold
+//    mostly sugar. The curve is driven by intensity relative to sustainable
+//    speed, which is the same model that feeds the other fields.
 //
-// 2. ASSORBIMENTO. Quello che mangi adesso non è disponibile adesso.
-//    Modelliamo lo stomaco come un serbatoio che si svuota con una costante
-//    di tempo di circa 20 minuti, e con un tetto: oltre una certa quantità
-//    oraria l'intestino non riesce ad assorbire, e il resto resta lì (nella
-//    realtà, con conseguenze note a chiunque abbia corso un ultra).
+// 2. ABSORPTION. What you eat now is not available now. The stomach is
+//    modelled as a reservoir emptying with a time constant of about 20
+//    minutes, and with a ceiling: past a certain hourly amount the gut cannot
+//    absorb it, and the surplus stays there (in reality too, with consequences
+//    familiar to anyone who has run an ultra).
 //
-// 3. RISERVA. Il glicogeno utilizzabile per la corsa, in grammi per kg.
+// 3. STORE. Glycogen usable for running, in grams per kg.
 //
-// LIMITE DICHIARATO: il modello assume che l'atleta segua davvero il piano
-// di alimentazione impostato. Non ha modo di sapere se hai mangiato: sui
-// Data Field non arrivano eventi dei tasti. È un'assunzione esplicita, non
-// un'approssimazione nascosta, ed è per questo che il piano è
-// un'impostazione visibile e non una costante sepolta nel codice.
+// STATED LIMIT: the model assumes the athlete actually follows the intake plan
+// they set. It has no way of knowing whether you ate: data fields receive no
+// button events. That is an explicit assumption rather than a hidden
+// approximation, and it is why the plan is a visible setting instead of a
+// constant buried in the code.
 
 import Toybox.Lang;
 
 class FuelModel {
 
     // ------------------------------------------------------------------
-    // COSTANTI DEL MODELLO
+    // MODEL CONSTANTS
     // ------------------------------------------------------------------
 
-    // Glicogeno utilizzabile per la corsa, in grammi per kg di massa
-    // corporea. Le riserve totali (muscolo più fegato) di un atleta
-    // allenato stanno tra 10 e 12 g/kg, ma solo la quota nei muscoli che
-    // stanno lavorando è realmente spendibile: il glicogeno dei bicipiti
-    // non aiuta a correre. 7 g/kg è la stima prudente di quanto è davvero
-    // disponibile, e per un atleta di 70 kg corrisponde a circa 490 g,
-    // cioè poco meno di 8600 kJ.
+    // Glycogen usable for running, in grams per kg of body mass. Total stores
+    // (muscle plus liver) in a trained athlete run between 10 and 12 g/kg, but
+    // only the share held in the muscles doing the work is actually spendable:
+    // glycogen in the biceps does not help you run. 7 g/kg is the conservative
+    // estimate of what is genuinely available, which for a 70 kg athlete is
+    // about 490 g, a little under 8600 kJ.
     const STORE_GRAMS_PER_KG as Float = 7.0;
 
-    // Energia resa dall'ossidazione di un grammo di carboidrati, in kJ.
+    // Energy released by oxidising one gram of carbohydrate, in kJ.
     const ENERGY_PER_GRAM_KJ as Float = 17.5;
 
-    // Costante di tempo dello svuotamento gastrico, in secondi. Venti
-    // minuti è il ritardo tipico tra l'assunzione e la disponibilità nel
-    // sangue. È il motivo per cui "mangia quando hai fame" è una pessima
-    // strategia in gara: quando la fame arriva, sei già in ritardo di venti
-    // minuti.
+    // Time constant of gastric emptying, in seconds. Twenty minutes is the
+    // typical delay between eating and availability in the blood. It is why
+    // "eat when you are hungry" is a poor race strategy: by the time hunger
+    // arrives you are already twenty minutes late.
     const GUT_TRANSIT_SEC as Float = 1200.0;
 
-    // Tetto di assorbimento intestinale, in grammi/ora. Con soli glucosio
-    // e maltodestrine il limite sta intorno ai 60 g/h; con miscele
-    // glucosio-fruttosio si arriva a 90-120 g/h in atleti con intestino
-    // allenato. Prendiamo il limite superiore: oltre quello, quello che
-    // ingerisci resta nello stomaco e non produce energia.
+    // Ceiling on intestinal absorption, in grams per hour. On glucose and
+    // maltodextrin alone the limit sits around 60 g/h; glucose and fructose
+    // mixes reach 90 to 120 g/h in athletes with a trained gut. The upper limit
+    // is what is used here: past it, what you swallow stays in the stomach and
+    // produces no energy.
     const MAX_ABSORPTION_GRAMS_PER_HOUR as Float = 120.0;
 
-    // Punti della curva di utilizzo dei carboidrati, in funzione
-    // dell'intensità relativa alla velocità sostenibile (1.0 = a soglia).
+    // Points on the carbohydrate utilisation curve, as a function of intensity
+    // relative to sustainable speed (1.0 = at threshold).
     //
-    // Interpolazione lineare a tratti invece della sigmoide che si userebbe
-    // su un computer: Monkey C non espone la funzione esponenziale, e
-    // ricostruirla costerebbe cicli su un dispositivo che deve chiudere
-    // compute() in pochi millisecondi. Cinque punti riproducono la sigmoide
-    // entro pochi punti percentuali, che è comunque molto meno
-    // dell'incertezza dei dati fisiologici sottostanti.
+    // Piecewise linear interpolation instead of the sigmoid you would use on a
+    // computer: Monkey C exposes no exponential function, and rebuilding one
+    // would cost cycles on a device that has to finish compute() in a few
+    // milliseconds. Five points reproduce the sigmoid to within a few
+    // percentage points, which is far less than the uncertainty in the
+    // underlying physiological data anyway.
     const INTENSITY_0 as Float = 0.40;
     const INTENSITY_1 as Float = 0.60;
     const INTENSITY_2 as Float = 0.80;
@@ -106,30 +104,30 @@ class FuelModel {
     const FRACTION_4 as Float = 0.95;
 
     // ------------------------------------------------------------------
-    // STATO
+    // STATE
     // ------------------------------------------------------------------
 
     private var mMassKg as Float;
 
-    // Riserva totale all'inizio dell'attività (g) e quanto ne resta (g).
+    // Total store at the start of the activity (g), and how much is left (g).
     private var mStoreGrams as Float;
     private var mRemainingGrams as Float;
 
-    // Carboidrati ingeriti ma non ancora assorbiti (g).
+    // Carbohydrate swallowed but not yet absorbed (g).
     private var mGutGrams as Float;
 
-    // Piano di alimentazione, in grammi al secondo.
+    // Intake plan, in grams per second.
     private var mIntakeGramsPerSec as Float;
 
-    // Ultimi tassi calcolati (g/s): quanto stiamo bruciando e quanto sta
-    // effettivamente entrando in circolo.
+    // Most recent rates (g/s): how much is being burned, and how much is
+    // actually reaching the bloodstream.
     private var mOxidationGramsPerSec as Float;
     private var mAbsorptionGramsPerSec as Float;
 
     private var mHasModel as Boolean;
 
     // ------------------------------------------------------------------
-    // COSTRUTTORE
+    // CONSTRUCTOR
     // ------------------------------------------------------------------
 
     function initialize() {
@@ -144,15 +142,15 @@ class FuelModel {
     }
 
     // ------------------------------------------------------------------
-    // Configura atleta e piano di alimentazione.
+    // Configures the athlete and the intake plan.
     //
-    //   massKg                massa corporea
-    //   intakeGramsPerHour    carboidrati che l'atleta prevede di assumere
-    //                         ogni ora, 0 se non ha un piano
+    //   massKg                body mass
+    //   intakeGramsPerHour    carbohydrate the athlete plans to take per hour,
+    //                         0 if there is no plan
     //
-    // Come in EnduranceEngine, se la riserva cambia a metà attività la
-    // conserviamo come FRAZIONE: cambiare il peso nelle impostazioni non
-    // deve regalare o togliere energia a chi sta già correndo.
+    // As in EnduranceEngine, when the store changes mid-activity what is
+    // preserved is the FRACTION: changing the body mass setting must not hand
+    // energy to, or take it from, somebody already running.
     // ------------------------------------------------------------------
     function setAthlete(massKg as Float, intakeGramsPerHour as Float) as Void {
         var fraction = 1.0;
@@ -168,10 +166,10 @@ class FuelModel {
         if (intake < 0.0) {
             intake = 0.0;
         } else if (intake > MAX_ABSORPTION_GRAMS_PER_HOUR) {
-            // Ingerire più del tetto di assorbimento non aumenta l'energia
-            // disponibile: accumula solo roba nello stomaco. Tagliamo qui
-            // invece di lasciare che il serbatoio gastrico cresca senza
-            // limite per tutta la gara.
+            // Swallowing more than the absorption ceiling does not increase
+            // available energy, it only piles up in the stomach. Cap it here
+            // rather than letting the gastric reservoir grow without limit for
+            // the whole race.
             intake = MAX_ABSORPTION_GRAMS_PER_HOUR;
         }
         mIntakeGramsPerSec = intake / 3600.0;
@@ -187,25 +185,25 @@ class FuelModel {
     }
 
     // ------------------------------------------------------------------
-    // Passo di integrazione.
+    // Integration step.
     //
-    //   metabolicPowerWPerKg  potenza metabolica attuale (W/kg), cioè
-    //                         C(0) * velocità equivalente in piano
-    //   intensity             velocità attuale divisa per quella
-    //                         sostenibile (1.0 = esattamente a soglia)
-    //   dt                    secondi trascorsi
+    //   metabolicPowerWPerKg  current metabolic power (W/kg), that is,
+    //                         C(0) * flat-equivalent speed
+    //   intensity             current speed divided by sustainable speed
+    //                         (1.0 = exactly at threshold)
+    //   dt                    seconds elapsed
     // ------------------------------------------------------------------
     function update(metabolicPowerWPerKg as Float, intensity as Float, dt as Float) as Void {
         if (!mHasModel || dt <= 0.0) {
             return;
         }
 
-        // --- Ossidazione -----------------------------------------------
+        // --- Oxidation -------------------------------------------------
         var fraction = carbFraction(intensity);
         var powerWatts = metabolicPowerWPerKg * mMassKg;
         mOxidationGramsPerSec = (powerWatts * fraction) / (ENERGY_PER_GRAM_KJ * 1000.0);
 
-        // --- Assorbimento con ritardo gastrico -------------------------
+        // --- Absorption, with the gastric delay ------------------------
         mGutGrams += mIntakeGramsPerSec * dt;
 
         var rate = mGutGrams / GUT_TRANSIT_SEC;
@@ -221,20 +219,20 @@ class FuelModel {
         mGutGrams -= absorbed;
         mAbsorptionGramsPerSec = (dt > 0.0) ? (absorbed / dt) : 0.0;
 
-        // --- Bilancio ---------------------------------------------------
+        // --- Balance ----------------------------------------------------
         mRemainingGrams += absorbed - (mOxidationGramsPerSec * dt);
         if (mRemainingGrams < 0.0) {
             mRemainingGrams = 0.0;
         } else if (mRemainingGrams > mStoreGrams) {
-            // Mangiare più di quanto si consuma non crea riserve nuove:
-            // il glicogeno muscolare ha un tetto fisico.
+            // Eating more than you burn does not create new stores: muscle
+            // glycogen has a physical ceiling.
             mRemainingGrams = mStoreGrams;
         }
     }
 
     // ------------------------------------------------------------------
-    // Frazione di energia proveniente dai carboidrati, per interpolazione
-    // lineare tra i cinque punti della curva.
+    // Fraction of energy coming from carbohydrate, by linear interpolation
+    // between the five points of the curve.
     // ------------------------------------------------------------------
     private function carbFraction(intensity as Float) as Float {
         if (intensity <= INTENSITY_0) {
@@ -255,14 +253,14 @@ class FuelModel {
         return FRACTION_4;
     }
 
-    // Interpolazione lineare tra due punti. Cinque argomenti, ben sotto il
-    // limite di 9 della VM Monkey C sui dispositivi meno recenti.
+    // Linear interpolation between two points. Five arguments, well under the
+    // limit of 9 the Monkey C VM imposes on older devices.
     private function interpolate(x as Float, x0 as Float, x1 as Float, y0 as Float, y1 as Float) as Float {
         return y0 + ((y1 - y0) * (x - x0)) / (x1 - x0);
     }
 
     // ------------------------------------------------------------------
-    // ACCESSORI
+    // ACCESSORS
     // ------------------------------------------------------------------
 
     function hasModel() as Boolean {
@@ -286,15 +284,15 @@ class FuelModel {
         return pct;
     }
 
-    // Carboidrati bruciati per ora al ritmo attuale (g/h).
+    // Carbohydrate burned per hour at the current rate (g/h).
     function getOxidationGramsPerHour() as Float {
         return mOxidationGramsPerSec * 3600.0;
     }
 
     // ------------------------------------------------------------------
-    // Secondi all'esaurimento della riserva, oppure null se al ritmo
-    // attuale l'assorbimento copre il consumo (nessun esaurimento in vista)
-    // o se il modello non è configurato.
+    // Seconds until the store runs out, or null when absorption covers
+    // consumption at the current rate, so nothing is running out, or when the
+    // model has not been configured.
     // ------------------------------------------------------------------
     function getTimeToDepletionSec() as Float? {
         if (!mHasModel) {

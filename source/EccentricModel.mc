@@ -17,44 +17,42 @@
 
 // EccentricModel.mc
 //
-// Accumulo del danno muscolare da discesa.
+// Accumulated muscle damage from descending.
 //
-// PERCHÉ ESISTE, E PERCHÉ NON ESISTE ALTROVE
-// In un ultra di montagna il primo sistema a cedere quasi mai è quello
-// aerobico: sono i quadricipiti. La discesa impone contrazioni eccentriche,
-// cioè il muscolo genera forza mentre si allunga per frenare il corpo. È il
-// tipo di contrazione che produce danno strutturale, e il danno non recupera
-// durante la gara: si accumula e basta. A metà UTMB non è il fiato a
-// mancare, sono le gambe che non frenano più.
+// WHY IT EXISTS, AND WHY NOTHING ELSE HAS IT
+// In a mountain ultra the first system to give out is almost never the aerobic
+// one: it is the quadriceps. Descending imposes eccentric contractions, where
+// the muscle produces force while lengthening in order to brake the body. That
+// is the kind of contraction that causes structural damage, and the damage does
+// not recover during the race; it only accumulates. Halfway through UTMB it is
+// not breath that runs out, it is legs that no longer brake.
 //
-// Nessun campo dati, e nessuna metrica nativa Garmin, modella questa cosa.
-// Tutti misurano il sistema cardiovascolare, che nel trail lungo spesso non
-// è il vincolo. È il pezzo più originale di questa app.
+// No data field, and no native Garmin metric, models this. They all measure the
+// cardiovascular system, which in long trail racing is frequently not the
+// binding constraint. This is the most original part of the app.
 //
-// COME LO MISURIAMO
-// Il lavoro negativo che il corpo deve assorbire scendendo è proporzionale
-// alla quota persa. Ma non tutti i metri di discesa costano uguale: scendere
-// veloce significa impatti più violenti e più forza da assorbire a ogni
-// passo. Pesiamo quindi la quota persa con un fattore che cresce con la
-// velocità:
+// HOW IT IS MEASURED
+// The negative work the body has to absorb going down is proportional to the
+// height lost. But not every metre of descent costs the same: descending fast
+// means harder impacts and more force to absorb at every step. So the height
+// lost is weighted by a factor that grows with speed:
 //
-//   metri equivalenti = quota persa * phi(velocità)
+//   equivalent metres = height lost * phi(speed)
 //
-// L'unità è quindi "metri di dislivello negativo equivalente": la stessa
-// unità in cui ogni trail runner già ragiona quando guarda il profilo di
-// una gara. Scendere 1000 m di corsa pesa più che scenderne 1000 camminando,
-// ed è esattamente quello che succede alle gambe.
+// The unit is therefore "equivalent metres of descent", the same unit every
+// trail runner already thinks in when they look at a race profile. Running
+// 1000 m of descent weighs more than walking the same 1000 m, which is exactly
+// what happens to the legs.
 //
-// LA CAPACITÀ
-// L'utente imposta quanto dislivello negativo regge prima che la discesa
-// diventi un problema. È un numero che chi corre in montagna conosce di sé
-// meglio di qualunque formula: sa se dopo 2000 m di discesa è a pezzi o se
-// ne regge 6000. Il default di 3000 m è la stima per un trail runner
-// allenato ma non specialista di discesa.
+// THE CAPACITY
+// The user sets how much descent their legs take before it becomes the problem.
+// It is a number mountain runners know about themselves better than any formula
+// does: they know whether 2000 m of descent wrecks them or whether they take
+// 6000. The 3000 m default is the estimate for a trained trail runner who is
+// not a descending specialist.
 //
-// NOTA: a differenza degli altri modelli, questo NON ha bisogno della
-// velocità critica. Funziona dal primo secondo del primo utilizzo, senza
-// alcuna calibrazione.
+// NOTE: unlike the other models, this one does NOT need critical speed. It
+// works from the first second of first use, with no calibration at all.
 
 import Toybox.Lang;
 import Toybox.Math;
@@ -62,50 +60,50 @@ import Toybox.Math;
 class EccentricModel {
 
     // ------------------------------------------------------------------
-    // COSTANTI DEL MODELLO
+    // MODEL CONSTANTS
     // ------------------------------------------------------------------
 
-    // Velocità di riferimento per il fattore di peso, in m/s (3 m/s sono
-    // circa 5:30 al km: una discesa corsa a ritmo sostenuto).
+    // Reference speed for the weighting factor, in m/s. 3 m/s is about 5:30 per
+    // km: a descent run at a solid pace.
     const REFERENCE_SPEED as Float = 3.0;
 
-    // Quanto cresce il costo per metro di quota persa al crescere della
-    // velocità. Con 0.5, scendere a 3 m/s pesa il 50% in più che scendere
-    // quasi fermi, e a 6 m/s il doppio.
+    // How much the cost per metre of height lost grows with speed. At 0.5,
+    // descending at 3 m/s weighs 50% more than descending nearly stationary,
+    // and 6 m/s weighs double.
     const SPEED_COEFFICIENT as Float = 0.5;
 
-    // Tetto al fattore di peso: oltre una certa velocità il modello
-    // smetterebbe di essere credibile, e comunque nessuno scende più
-    // veloce di così per ore.
+    // Ceiling on the weighting factor: past a certain speed the model would
+    // stop being credible, and nobody descends faster than this for hours
+    // anyway.
     const MAX_WEIGHT as Float = 2.0;
 
-    // Limiti accettati per la capacità impostata dall'utente, in metri.
+    // Accepted range for the capacity the user sets, in metres.
     const MIN_CAPACITY_M as Float = 500.0;
     const MAX_CAPACITY_M as Float = 15000.0;
 
     // ------------------------------------------------------------------
-    // STATO
+    // STATE
     // ------------------------------------------------------------------
 
-    // Dislivello negativo equivalente che l'atleta regge (m).
+    // Equivalent descent the athlete can take (m).
     private var mCapacityMeters as Float;
 
-    // Dislivello negativo equivalente accumulato finora (m), cioè pesato
-    // per la velocità di discesa.
+    // Equivalent descent accumulated so far (m), that is, weighted by the
+    // speed of descent.
     private var mEquivalentMeters as Float;
 
-    // Dislivello negativo grezzo accumulato (m), non pesato. Serve come
-    // riferimento leggibile e per il confronto a posteriori con il dato
-    // di dislivello che registra il dispositivo per conto suo.
+    // Raw descent accumulated (m), unweighted. Kept as a readable reference,
+    // and so it can be compared afterwards against the descent the device
+    // records on its own.
     private var mDescentMeters as Float;
 
-    // Tasso di accumulo attuale (m equivalenti al secondo). Vale 0 quando
-    // non si sta scendendo: è ciò che rende il tempo al limite null in
-    // salita e in piano, dove le gambe non stanno peggiorando.
+    // Current rate of accumulation (equivalent metres per second). Zero when
+    // not descending, which is what makes the time to limit null on climbs and
+    // on the flat, where the legs are not getting worse.
     private var mEquivalentRate as Float;
 
     // ------------------------------------------------------------------
-    // COSTRUTTORE
+    // CONSTRUCTOR
     // ------------------------------------------------------------------
 
     function initialize() {
@@ -116,11 +114,10 @@ class EccentricModel {
     }
 
     // ------------------------------------------------------------------
-    // Imposta la capacità di discesa dell'atleta, in metri di dislivello
-    // negativo. Valori fuori scala vengono riportati nei limiti invece di
-    // essere rifiutati: qui, a differenza della velocità critica, non
-    // esiste un valore "impossibile" che indichi un dato corrotto, solo
-    // valori più o meno ottimistici.
+    // Sets the athlete's descent capacity, in metres of descent. Values out of
+    // range are clamped rather than rejected: unlike critical speed, there is
+    // no "impossible" value here that would signal corrupt data, only more or
+    // less optimistic ones.
     // ------------------------------------------------------------------
     function setCapacity(capacityMeters as Float) as Void {
         var c = capacityMeters;
@@ -139,33 +136,33 @@ class EccentricModel {
     }
 
     // ------------------------------------------------------------------
-    // Passo di integrazione.
+    // Integration step.
     //
-    //   speed          velocità reale lungo il terreno (m/s), NON quella
-    //                  equivalente in piano: qui conta il movimento vero
-    //                  del corpo, non il suo costo aerobico
-    //   gradeFraction  pendenza come frazione (negativa in discesa)
-    //   dt             secondi trascorsi
+    //   speed          real speed along the ground (m/s), NOT the flat
+    //                  equivalent: what counts here is the actual movement of
+    //                  the body, not its aerobic cost
+    //   gradeFraction  grade as a fraction, negative when descending
+    //   dt             seconds elapsed
     // ------------------------------------------------------------------
     function update(speed as Float, gradeFraction as Float, dt as Float) as Void {
         mEquivalentRate = 0.0;
 
         if (dt <= 0.0 || speed <= 0.0 || gradeFraction >= 0.0) {
-            // In salita e in piano non si accumula danno eccentrico. Non è
-            // una semplificazione: la contrazione eccentrica del
-            // quadricipite è specifica della frenata in discesa.
+            // No eccentric damage accumulates uphill or on the flat. That is
+            // not a simplification: eccentric contraction of the quadriceps is
+            // specific to braking on a descent.
             return;
         }
 
-        // Quota persa per metro percorso: seno della pendenza, non la
-        // pendenza stessa. Sulle pendenze dolci la differenza è
-        // trascurabile, ma al 45% la pendenza vale 0.45 e il seno 0.41,
-        // e usare la prima sovrastimerebbe la discesa del 10% proprio dove
-        // il terreno è più ripido e il conto conta di più.
-        // toFloat() esplicito: Math.sqrt() restituisce un Double, e senza la
-        // conversione il tipo si propaga fino ai campi Float della classe,
-        // cosa che il controllo di tipo stretto rifiuta.
-        var g = -gradeFraction; // positivo in discesa
+        // Height lost per metre travelled: the sine of the grade, not the
+        // grade itself. On gentle slopes the difference is negligible, but at
+        // 45% the grade is 0.45 and the sine is 0.41, and using the former
+        // would overestimate the descent by 10% exactly where the ground is
+        // steepest and the number matters most.
+        // The explicit toFloat(): Math.sqrt() returns a Double, and without the
+        // conversion that type propagates into the class's Float fields, which
+        // strict type checking rejects.
+        var g = -gradeFraction; // positive when descending
         var sinTheta = (g / Math.sqrt(1.0 + (g * g))).toFloat();
 
         var verticalRate = speed * sinTheta;
@@ -181,20 +178,20 @@ class EccentricModel {
     }
 
     // ------------------------------------------------------------------
-    // ACCESSORI
+    // ACCESSORS
     // ------------------------------------------------------------------
 
-    // Dislivello negativo equivalente accumulato (m).
+    // Equivalent descent accumulated (m).
     function getEquivalentMeters() as Float {
         return mEquivalentMeters;
     }
 
-    // Dislivello negativo grezzo accumulato (m).
+    // Raw descent accumulated (m).
     function getDescentMeters() as Float {
         return mDescentMeters;
     }
 
-    // Capacità di discesa residua, in percentuale.
+    // Descent capacity left, as a percentage.
     function getRemainingPercent() as Float {
         if (mCapacityMeters <= 0.0) {
             return 0.0;
@@ -209,9 +206,9 @@ class EccentricModel {
     }
 
     // ------------------------------------------------------------------
-    // Secondi prima di esaurire la capacità di discesa, al ritmo di
-    // accumulo attuale. Vale null quando non si sta scendendo: in salita le
-    // gambe non peggiorano, quindi un tempo al limite non esiste.
+    // Seconds before the descent capacity runs out at the current rate of
+    // accumulation. Null when not descending: uphill the legs are not getting
+    // worse, so there is no time to limit.
     // ------------------------------------------------------------------
     function getTimeToLimitSec() as Float? {
         if (mEquivalentRate <= 0.0) {
