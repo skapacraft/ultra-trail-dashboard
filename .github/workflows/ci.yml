@@ -1,0 +1,56 @@
+name: CI
+
+# Runs on every push and pull request to any branch.
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+
+permissions:
+  contents: read
+
+jobs:
+  resources:
+    name: Resources
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # Compiling would need the Connect IQ SDK, which cannot be fetched without
+      # accepting Garmin's licence interactively. These checks cover the faults
+      # a compile would not have caught anyway: a translation missing an id, and
+      # a version that drifted away from the changelog.
+      - name: Check resources, translations and version
+        run: python3 .github/scripts/check_resources.py
+
+  hygiene:
+    name: Hygiene
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: No em dashes in tracked text
+        run: |
+          if git grep -nI --  $'—' -- '*.md' '*.xml' '*.mc' '*.jungle'; then
+            echo "::error::Em dashes found. Use a colon, a comma or parentheses."
+            exit 1
+          fi
+          echo "no em dashes"
+
+      - name: No build output or signing keys committed
+        run: |
+          if git ls-files | grep -E '\.(prg|der|pem|key|p12)$'; then
+            echo "::error::Build output or a signing key is tracked."
+            exit 1
+          fi
+          echo "no build output or keys tracked"

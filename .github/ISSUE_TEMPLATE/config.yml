@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/skapacraft/ultra-trail-dashboard/security/advisories/new
+    about: Report it privately here, never in a public issue.
+  - name: Product page
+    url: https://skapacraft.com/tools/apps/ultra-trail-dashboard/
+    about: What each field means, and how the model works.
+  - name: Connect IQ Store
+    url: https://apps.garmin.com/it-IT/apps/76cbcc4a-623e-40da-87c7-762187c3247c
+    about: Install the data field on your watch.

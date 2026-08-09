@@ -2,7 +2,33 @@
 
 All notable changes to Ultra-Trail Dashboard are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
-and the project uses [semantic versioning](https://semver.org/).
+and the project uses [semantic versioning](https://semver.org/). The version
+here is the one in `manifest.xml`, which is what the Connect IQ Store publishes.
+
+## [Unreleased]
+
+### Fixed
+- `manifest.xml` carried no version at all, so nothing tied the built binary to
+  a changelog entry. Set to 1.2.0, and CI now compares the two on every push.
+- The Italian translation was missing nine string ids. Eight of them, the FIT
+  field labels, are meant to stay in English so that one athlete's activity
+  files stay consistent when they change the watch language; that intent is now
+  recorded in `.github/untranslated.txt` rather than left as an apparent gap.
+
+### Changed
+- Comments, and the documentation inside the resource files, are in English.
+  They were in Italian throughout a public repository whose README, strings and
+  store listing are in English, which left the reasoning behind the models
+  readable only to Italian speakers. The reasoning is the part worth reading
+  here, so it should not have been the part gated by language.
+
+### Added
+- `SECURITY.md`, `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, and issue and pull
+  request templates.
+- Continuous integration on every push: resource XML well-formedness,
+  translation parity against the default language, and the manifest against
+  this file.
+- Dependabot for the CI actions.
 
 ## [1.2.0] - 2026-07-30
 

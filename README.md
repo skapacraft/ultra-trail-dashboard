@@ -179,11 +179,39 @@ No data is collected, stored, or transmitted anywhere. All calculations run
 entirely on-device, including the calibration, whose personal bests never
 leave the watch. Full [privacy policy](https://skapacraft.com/tools/apps/ultra-trail-dashboard/privacy/).
 
-## License
+## Reporting a security problem
 
-GPLv3. See [LICENSE](LICENSE) for the full text. The Connect IQ Store binary
-is built from this same source, unmodified.
+Not in a public issue: use the **Security** tab, then **Report a vulnerability**.
+A data field runs inside the activity process, so a fault there can cost
+somebody a race that cannot be repeated. What counts as one here, and what does
+not, is in [SECURITY.md](SECURITY.md).
+
+## Contributing
+
+How to report, propose and build is in [CONTRIBUTING.md](CONTRIBUTING.md). The
+short version: any change to the models runs the unit tests, and arrives with a
+number rather than an argument.
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) for the full history.
 
 ## Author
 
 Built by [SkapaCraft](https://skapacraft.com) and [LivQTech](https://livq.it).
+
+## Trademarks
+
+Not affiliated with, endorsed by or sponsored by Garmin Ltd. Garmin, Connect IQ,
+Garmin Connect and fenix are trademarks of Garmin Ltd., named here only to
+identify the platform this software runs on. Strava is a trademark of Strava,
+Inc.
+
+## Licence
+
+Copyright (C) 2026 SkapaCraft. GPL-3.0-or-later, see [LICENSE](LICENSE).
+
+The Connect IQ Store binary is built from this same source, unmodified. That is
+the point of the licence here: the models decide what an athlete is told about
+their own limits, so the arithmetic behind those numbers has to stay readable
+and stay open.

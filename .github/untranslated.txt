@@ -1,0 +1,19 @@
+# String ids a translation is allowed to omit, so that a string forgotten in one
+# language stays distinguishable from one left in English on purpose.
+# Checked by .github/scripts/check_resources.py.
+
+# The application name is a proper noun, identical in every language.
+AppName
+
+# Labels of the custom fields written into the .FIT file. They are column names
+# inside a data file, read afterwards on Garmin Connect and Strava. Translating
+# them would make one athlete's own files inconsistent with each other the day
+# they change the watch language.
+GapFieldLabel
+ReserveFieldLabel
+SustainFieldLabel
+WorkFieldLabel
+CsFieldLabel
+DPrimeFieldLabel
+CarbFieldLabel
+EccentricFieldLabel

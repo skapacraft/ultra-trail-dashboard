@@ -1,0 +1,13 @@
+# Copyright (C) 2026 SkapaCraft <https://skapacraft.com>
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+# Monkey C has no package manager, so there is one dependency graph worth
+# watching here: the actions CI runs, which hold a token on every push.
+version: 2
+
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    labels: [dependencies]
