@@ -4,7 +4,13 @@ Connect IQ Data Field for Garmin devices, built for trail and ultra runners.
 Four configurable quadrants on one full-screen view, backed by a physiological
 model that keeps track of what the effort is costing you.
 
-**[Get it on the Connect IQ Store](https://apps.garmin.com/it-IT/apps/76cbcc4a-623e-40da-87c7-762187c3247c)** · **[Product page](https://skapacraft.com/tools/apps/ultra-trail-dashboard/)** · **[Changelog](CHANGELOG.md)**
+> **Discontinued.** Ultra-Trail Dashboard is no longer developed and has been withdrawn
+> from the Connect IQ Store. If it is already on your watch it keeps working as it does
+> today: it never needed a server, so there is nothing to switch off. It will not receive
+> updates, fixes or support for new devices. The source stays here, under the same
+> licence, for anyone who wants to build it or carry it on.
+
+**[Changelog](CHANGELOG.md)** · **[Privacy policy](PRIVACY.md)**
 
 ## What it shows
 
@@ -177,7 +183,7 @@ monkeyc -f "monkey.jungle;test.jungle" -o bin/test.prg -y developer_key -d fenix
 
 No data is collected, stored, or transmitted anywhere. All calculations run
 entirely on-device, including the calibration, whose personal bests never
-leave the watch. Full [privacy policy](https://skapacraft.com/tools/apps/ultra-trail-dashboard/privacy/).
+leave the watch. Full [privacy policy](PRIVACY.md).
 
 ## Reporting a security problem
 
@@ -211,7 +217,7 @@ Inc.
 
 Copyright (C) 2026 SkapaCraft. GPL-3.0-or-later, see [LICENSE](LICENSE).
 
-The Connect IQ Store binary is built from this same source, unmodified. That is
+The Connect IQ Store binary was built from this same source, unmodified. That is
 the point of the licence here: the models decide what an athlete is told about
 their own limits, so the arithmetic behind those numbers has to stay readable
 and stay open.
